@@ -1050,30 +1050,29 @@ namespace HLMCUpdater
                 Directory.CreateDirectory(tempDir);
                 steps.Add("Step 1: Temp directory created successfully");
 
-                // Download exe from GitHub releases
+                // Download exe from GitHub repository tree (public repo, no auth needed)
                 using (var client = new HttpClient())
                 {
                     steps.Add("Step 2: Setting up HTTP client");
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
-                    if (!string.IsNullOrEmpty(GitHubToken))
-                    {
-                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
-                    }
-                    string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}";
-                    steps.Add($"Step 3: Fetching GitHub release info from {apiUrl}");
+                    steps.Add("Step 2: Public repository - skipping authentication");
+                    // Note: Removed authorization header for public repository call
+                    string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=true";
+                    steps.Add($"Step 3: Fetching GitHub tree from {apiUrl}");
                     var json = await client.GetStringAsync(apiUrl);
                     steps.Add($"Step 3: Received JSON response ({json.Length} characters)");
-                    var release = JsonSerializer.Deserialize<GitHubRelease>(json);
-                    steps.Add($"Step 3: Deserialized release - Assets count: {release?.Assets?.Count ?? 0}");
+                    var tree = JsonSerializer.Deserialize<GitHubTree>(json);
+                    steps.Add($"Step 3: Deserialized tree - Items count: {tree?.Tree?.Count ?? 0}");
 
-                    if (release?.Assets?.Count > 0)
+                    if (tree?.Tree != null)
                     {
-                        steps.Add("Step 4: Looking for exe asset");
-                        var exeAsset = release.Assets.FirstOrDefault(x => x.BrowserDownloadUrl?.EndsWith(".exe") == true);
-                        if (exeAsset?.BrowserDownloadUrl != null)
+                        steps.Add("Step 4: Looking for exe file in repository");
+                        var exeItem = tree.Tree.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
+                        if (exeItem?.path != null)
                         {
-                            var downloadUrl = exeAsset.BrowserDownloadUrl;
-                            steps.Add($"Step 4: Found exe asset at {downloadUrl}");
+                            string exeName = exeItem.path;
+                            var downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
+                            steps.Add($"Step 4: Found exe at {downloadUrl}");
 
                             steps.Add("Step 5: Starting exe download");
                             using (var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -1106,14 +1105,14 @@ namespace HLMCUpdater
                         }
                         else
                         {
-                            steps.Add("Step 4: No exe asset found");
-                            remoteVersion = "could not get - no exe asset";
+                            steps.Add("Step 4: No exe file found in repository root");
+                            remoteVersion = "could not get - no exe found";
                         }
                     }
                     else
                     {
-                        steps.Add("Step 3: No assets found in release");
-                        remoteVersion = "could not get - no assets";
+                        steps.Add("Step 3: No tree data received");
+                        remoteVersion = "could not get - no tree data";
                     }
                 }
             }
