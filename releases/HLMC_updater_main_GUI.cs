@@ -37,6 +37,7 @@ namespace HLMCUpdater
 
         Panel welcomePanel, progressPanel, summaryPanel;
         Label titleLabel, creditLabel, versionLabel, statusLabel, downloadProgressLabel, summaryTitleLabel, summaryCountLabel;
+        Label updateStatusLabel;
         Button startButton, closeButton, cancelButton;
         ProgressBar downloadProgressBar;
         TextBox summaryTextBox;
@@ -186,6 +187,18 @@ namespace HLMCUpdater
                 ForeColor = Color.FromArgb(80, 80, 80)
             };
             welcomePanel.Controls.Add(versionLabel);
+
+            updateStatusLabel = new Label
+            {
+                Text = "",
+                Font = new Font("Arial", 12, FontStyle.Bold),
+                AutoSize = true,
+                ForeColor = Color.Gold,
+                Location = new Point(10, 10),
+                Anchor = AnchorStyles.Top
+            };
+            welcomePanel.Controls.Add(updateStatusLabel);
+            CenterControlX(updateStatusLabel, welcomePanel);
 
             // --- Progress View Controls ---
             progressPanel = new Panel { Dock = DockStyle.Fill, Visible = false, BackColor = Color.FromArgb(40, 40, 40) };
@@ -928,7 +941,16 @@ namespace HLMCUpdater
         {
             _programVersion = "v" + EmbeddedVersion;
             MainForm_Resize(sender, e);
-            await CheckForUpdaterUpdatesOnStartup();
+            bool updateAvailable = await CheckForUpdaterUpdatesOnStartup();
+
+            Color statusColor = updateAvailable ? Color.Green : Color.Gray;
+            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "";
+            updateStatusLabel.ForeColor = statusColor;
+            updateStatusLabel.Visible = true;
+            CenterControlX(updateStatusLabel, welcomePanel);
+
+            await Task.Delay(3000); // 3 second delay before hiding
+            updateStatusLabel.Visible = false;
         }
 
         private void MainForm_Resize(object? sender, EventArgs e)
@@ -959,13 +981,13 @@ namespace HLMCUpdater
             control.Location = new Point(x, control.Location.Y);
         }
 
-        private async Task CheckForUpdaterUpdatesOnStartup()
+        private async Task<bool> CheckForUpdaterUpdatesOnStartup()
         {
             try
             {
                 var Items = await FetchRepoTree();
                 var exeItem = Items.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
-                if (exeItem?.path == null) return;
+                if (exeItem?.path == null) return false;
 
                 string exeName = exeItem.path;
                 string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
@@ -1008,11 +1030,17 @@ namespace HLMCUpdater
                         updateButton.FlatAppearance.BorderSize = 2;
                         updateButton.Click += async (s, e) => await DownloadUpdaterUpdate();
                         welcomePanel.Controls.Add(updateButton);
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
                     }
                 }
                 catch
                 {
                     // Silently fail
+                    return false;
                 }
                 finally
                 {
@@ -1022,6 +1050,7 @@ namespace HLMCUpdater
             catch (Exception)
             {
                 // Silently fail - just continue with normal operation
+                return false;
             }
         }
         // --- Helper Classes ---
