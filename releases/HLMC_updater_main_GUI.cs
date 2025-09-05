@@ -25,7 +25,7 @@ namespace HLMCUpdater
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
         const string GitHubToken = ""; // No API token needed for basic usage
-        const string EmbeddedVersion = "1.1.0.2";
+        const string EmbeddedVersion = "1.1.0.3";
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
@@ -785,38 +785,42 @@ namespace HLMCUpdater
                     var json = await client.GetStringAsync(apiUrl);
                     var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
-                    if (release?.Assets?.Count > 0 && release.TagName != EmbeddedVersion)
+                    if (release?.Assets?.Count > 0)
                     {
-                        // Show update button
-                        var updateButton = new Button
+                        string tagVersion = release.TagName?.TrimStart('v') ?? "";
+                        if (tagVersion != EmbeddedVersion)
                         {
-                            Text = "Update Updater",
-                            Size = new Size(220, 50),
-                            Font = new Font("Segoe UI", 13, FontStyle.Bold),
-                            Anchor = AnchorStyles.Top,
-                            BackColor = Color.FromArgb(60, 180, 75),
-                            ForeColor = Color.White,
-                            FlatStyle = FlatStyle.Flat,
-                            Location = new Point((welcomePanel.Width - 220) / 2, 400)
-                        };
-                        updateButton.FlatAppearance.BorderColor = Color.FromArgb(70, 120, 70);
-                        updateButton.FlatAppearance.BorderSize = 2;
-                        updateButton.Click += async (s, e) =>
-                        {
-                            // Add null check for release.Assets[0].BrowserDownloadUrl
-                            if (release.Assets != null && release.Assets.Count > 0 && !string.IsNullOrEmpty(release.Assets[0].BrowserDownloadUrl))
+                            // Show update button
+                            var updateButton = new Button
                             {
-                                await DownloadUpdaterUpdate(release.Assets[0].BrowserDownloadUrl!);
-                            }
-                        };
-                        welcomePanel.Controls.Add(updateButton);
+                                Text = "Update Updater",
+                                Size = new Size(220, 50),
+                                Font = new Font("Segoe UI", 13, FontStyle.Bold),
+                                Anchor = AnchorStyles.Top,
+                                BackColor = Color.FromArgb(60, 180, 75),
+                                ForeColor = Color.White,
+                                FlatStyle = FlatStyle.Flat,
+                                Location = new Point((welcomePanel.Width - 220) / 2, 400)
+                            };
+                            updateButton.FlatAppearance.BorderColor = Color.FromArgb(70, 120, 70);
+                            updateButton.FlatAppearance.BorderSize = 2;
+                            updateButton.Click += async (s, e) =>
+                            {
+                                // Add null check for release.Assets[0].BrowserDownloadUrl
+                                if (release.Assets != null && release.Assets.Count > 0 && !string.IsNullOrEmpty(release.Assets[0].BrowserDownloadUrl))
+                                {
+                                    await DownloadUpdaterUpdate(release.Assets[0].BrowserDownloadUrl!);
+                                }
+                            };
+                            welcomePanel.Controls.Add(updateButton);
 
-                        // Remove the regular check button
-                        welcomePanel.Controls.Remove(startButton);
-                    }
-                    else
-                    {
-                        MessageBox.Show("You are already using the latest version of the updater.", "Up to date", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            // Remove the regular check button
+                            welcomePanel.Controls.Remove(startButton);
+                        }
+                        else
+                        {
+                            MessageBox.Show("You are already using the latest version of the updater.", "Up to date", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
                     }
                 }
             }
@@ -960,7 +964,8 @@ namespace HLMCUpdater
                                 string json = await response.Content.ReadAsStringAsync();
                                 var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
-                                if (release?.Assets?.Count > 0 && release.TagName != EmbeddedVersion)
+                                string tagVersion = release.TagName?.TrimStart('v') ?? "";
+                                if (release?.Assets?.Count > 0 && tagVersion != EmbeddedVersion)
                                 {
                                     // Replace the modpack update button with updater update button
                                     welcomePanel.Controls.Remove(startButton);
