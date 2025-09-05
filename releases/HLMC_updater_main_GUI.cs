@@ -25,7 +25,7 @@ namespace HLMCUpdater
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
         const string GitHubToken = ""; // No API token needed for basic usage
-        const string EmbeddedVersion = "1.1.0.3";
+        const string EmbeddedVersion = "1.1.0.4";
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
@@ -965,6 +965,7 @@ namespace HLMCUpdater
                                 var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
                                 string tagVersion = release.TagName?.TrimStart('v') ?? "";
+                                MessageBox.Show($"GitHub Tag: {release.TagName}, Tag Version: {tagVersion}, Embedded: {EmbeddedVersion}", "Debug");
                                 if (release?.Assets?.Count > 0 && tagVersion != EmbeddedVersion)
                                 {
                                     // Replace the modpack update button with updater update button
