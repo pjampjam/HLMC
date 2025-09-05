@@ -25,7 +25,7 @@ namespace HLMCUpdater
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
         const string GitHubToken = ""; // No API token needed for basic usage
-        const string EmbeddedVersion = "1.1.0.4";
+        private static readonly string EmbeddedVersion = Assembly.GetExecutingAssembly().GetName().Version!.ToString();
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
@@ -599,7 +599,7 @@ namespace HLMCUpdater
             this.Refresh();
         }
 
-        private Task<List<RepoItem>> FetchRepoTree()
+        private async Task<List<RepoItem>> FetchRepoTree()
         {
             string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             string cacheFile = Path.Combine(exeDir, "repoTreeCache.json");
@@ -612,14 +612,31 @@ namespace HLMCUpdater
                     if (cache != null && cache.Items != null)
                     {
                         UpdateStatus("Using cached repository data.");
-                        return Task.FromResult(cache.Items!);
+                        return cache.Items!;
                     }
                 }
                 catch { } // ignore corrupted cache
             }
 
-            // Skip API call to avoid authentication issues - rely on cache only
-            throw new Exception("Repository cache not available. Please ensure repoTreeCache.json exists and is valid.");
+            // Fetch from GitHub API
+            using (var client = new HttpClient())
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=true";
+                string json = await client.GetStringAsync(apiUrl);
+                var response = JsonSerializer.Deserialize<GitHubTree>(json);
+                if (response?.Tree != null)
+                {
+                    var cache = new CacheData { LastUpdate = DateTime.Now, Items = response.Tree };
+                    File.WriteAllText(cacheFile, JsonSerializer.Serialize(cache));
+                    UpdateStatus("Fetched repository data.");
+                    return response.Tree;
+                }
+                else
+                {
+                    throw new Exception("Failed to fetch repository tree.");
+                }
+            }
         }
 
         private async Task SyncFolder(string folderName, string fileFilter, List<RepoItem> repoTree, SyncResults results, string scriptRoot, HttpClient client)
@@ -804,14 +821,7 @@ namespace HLMCUpdater
                             };
                             updateButton.FlatAppearance.BorderColor = Color.FromArgb(70, 120, 70);
                             updateButton.FlatAppearance.BorderSize = 2;
-                            updateButton.Click += async (s, e) =>
-                            {
-                                // Add null check for release.Assets[0].BrowserDownloadUrl
-                                if (release.Assets != null && release.Assets.Count > 0 && !string.IsNullOrEmpty(release.Assets[0].BrowserDownloadUrl))
-                                {
-                                    await DownloadUpdaterUpdate(release.Assets[0].BrowserDownloadUrl!);
-                                }
-                            };
+                            updateButton.Click += async (s, e) => await DownloadUpdaterUpdate();
                             welcomePanel.Controls.Add(updateButton);
 
                             // Remove the regular check button
@@ -830,15 +840,8 @@ namespace HLMCUpdater
             }
         }
 
-        private async Task DownloadUpdaterUpdate(string downloadUrl)
+        private async Task DownloadUpdaterUpdate()
         {
-            // Add null check for downloadUrl
-            if (string.IsNullOrEmpty(downloadUrl))
-            {
-                UpdateStatus("Invalid download URL");
-                return;
-            }
-
             string? currentExe = Environment.ProcessPath;
             if (string.IsNullOrEmpty(currentExe))
             {
@@ -852,6 +855,18 @@ namespace HLMCUpdater
 
             try
             {
+                UpdateStatus("Fetching repository data for updater...");
+                var Items = await FetchRepoTree();
+                var exeItem = Items.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
+                if (exeItem?.path == null)
+                {
+                    UpdateStatus("No updater exe found in repository");
+                    return;
+                }
+
+                string exeName = exeItem.path;
+                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
+
                 UpdateStatus("Downloading updater update...");
 
                 using (var client = new HttpClient())
@@ -948,71 +963,60 @@ namespace HLMCUpdater
         {
             try
             {
-                using (var client = new HttpClient())
+                var Items = await FetchRepoTree();
+                var exeItem = Items.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
+                if (exeItem?.path == null) return;
+
+                string exeName = exeItem.path;
+                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
+                string tempExe = Path.Combine(Path.GetTempPath(), "remote_updater.exe");
+
+                try
                 {
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
-                    string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
-                    int maxRetries = 3;
-                    int attempt = 0;
-                    while (attempt < maxRetries)
+                    using (var client = new HttpClient())
                     {
-                        try
+                        client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                        using (var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
                         {
-                            var response = await client.GetAsync(apiUrl);
-                            if (response.IsSuccessStatusCode)
+                            response.EnsureSuccessStatusCode();
+                            using (var stream = await response.Content.ReadAsStreamAsync())
+                            using (var fileStream = File.OpenWrite(tempExe))
                             {
-                                string json = await response.Content.ReadAsStringAsync();
-                                var release = JsonSerializer.Deserialize<GitHubRelease>(json);
-
-                                string tagVersion = release.TagName?.TrimStart('v') ?? "";
-                                MessageBox.Show($"GitHub Tag: {release.TagName}, Tag Version: {tagVersion}, Embedded: {EmbeddedVersion}", "Debug");
-                                if (release?.Assets?.Count > 0 && tagVersion != EmbeddedVersion)
-                                {
-                                    // Replace the modpack update button with updater update button
-                                    welcomePanel.Controls.Remove(startButton);
-
-                                    var updateButton = new Button
-                                    {
-                                        Text = "Update Updater",
-                                        Size = new Size(220, 50),
-                                        Font = new Font("Arial", 13, FontStyle.Bold),
-                                        Anchor = AnchorStyles.Top,
-                                        BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
-                                        ForeColor = Color.White,
-                                        FlatStyle = FlatStyle.Flat,
-                                        Location = new Point((welcomePanel.Width - 220) / 2, 320)
-                                    };
-                                    updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
-                                    updateButton.FlatAppearance.BorderSize = 2;
-                                    updateButton.Click += async (s, e) =>
-                                    {
-                                        if (release.Assets != null && release.Assets.Count > 0 && !string.IsNullOrEmpty(release.Assets[0].BrowserDownloadUrl))
-                                        {
-                                            await DownloadUpdaterUpdate(release.Assets[0].BrowserDownloadUrl!);
-                                        }
-                                    };
-                                    welcomePanel.Controls.Add(updateButton);
-                                }
-                                break;
+                                await stream.CopyToAsync(fileStream);
                             }
-                            else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                            {
-                                int delay = (int)Math.Pow(2, attempt) * 1000;
-                                await Task.Delay(delay);
-                                attempt++;
-                            }
-                            else
-                            {
-                                break; // non-retryable
-                            }
-                        }
-                        catch (Exception) when (attempt < maxRetries - 1)
-                        {
-                            int delay = (int)Math.Pow(2, attempt) * 1000;
-                            await Task.Delay(delay);
-                            attempt++;
                         }
                     }
+
+                    string remoteVersion = FileVersionInfo.GetVersionInfo(tempExe).FileVersion ?? "";
+                    if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != EmbeddedVersion)
+                    {
+                        // Replace the modpack update button with updater update button
+                        welcomePanel.Controls.Remove(startButton);
+
+                        var updateButton = new Button
+                        {
+                            Text = "Update Updater",
+                            Size = new Size(220, 50),
+                            Font = new Font("Arial", 13, FontStyle.Bold),
+                            Anchor = AnchorStyles.Top,
+                            BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
+                            ForeColor = Color.White,
+                            FlatStyle = FlatStyle.Flat,
+                            Location = new Point((welcomePanel.Width - 220) / 2, 320)
+                        };
+                        updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
+                        updateButton.FlatAppearance.BorderSize = 2;
+                        updateButton.Click += async (s, e) => await DownloadUpdaterUpdate();
+                        welcomePanel.Controls.Add(updateButton);
+                    }
+                }
+                catch
+                {
+                    // Silently fail
+                }
+                finally
+                {
+                    if (File.Exists(tempExe)) File.Delete(tempExe);
                 }
             }
             catch (Exception)
@@ -1021,17 +1025,23 @@ namespace HLMCUpdater
             }
         }
         // --- Helper Classes ---
-        class RepoItem
-        {
-            public string? path { get; set; }
-            public string? type { get; set; }
-        }
-
-        class CacheData
-        {
-            public DateTime LastUpdate { get; set; }
-            public List<RepoItem>? Items { get; set; }
-        }
+                class GitHubTree
+                {
+                    public string? Sha { get; set; }
+                    public List<RepoItem>? Tree { get; set; }
+                }
+        
+                class RepoItem
+                {
+                    public string? path { get; set; }
+                    public string? type { get; set; }
+                }
+        
+                class CacheData
+                {
+                    public DateTime LastUpdate { get; set; }
+                    public List<RepoItem>? Items { get; set; }
+                }
 
         class SyncResults
         {
