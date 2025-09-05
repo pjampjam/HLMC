@@ -7,11 +7,13 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 #pragma warning disable IL2026, CS8602
 
 namespace HLMCUpdater
@@ -23,6 +25,10 @@ namespace HLMCUpdater
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
         const string ProgramVersion = "v1.1.0.0";
+        const string GitHubToken = "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"; // Set your GitHub Personal Access Token here to bypass rate limits
+
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
 
         Panel welcomePanel, progressPanel, summaryPanel;
         Label titleLabel, creditLabel, versionLabel, statusLabel, downloadProgressLabel, summaryTitleLabel, summaryCountLabel;
@@ -30,6 +36,7 @@ namespace HLMCUpdater
         ProgressBar downloadProgressBar;
         TextBox summaryTextBox;
         CancellationTokenSource _cts;
+        private List<string> currentDownloads = new List<string>();
 
         private string MinecraftPath
         {
@@ -54,11 +61,42 @@ namespace HLMCUpdater
                     }
                 }
 
-                // Fallback to default Minecraft path
-                return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    ".minecraft"
-                );
+                // Prompt user to select the Minecraft modpack folder
+                using (var folderDialog = new FolderBrowserDialog())
+                {
+                    folderDialog.Description = "Select your Minecraft modpack folder";
+                    folderDialog.SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+                    string selectedPath = "";
+                    bool validFolder = false;
+
+                    do
+                    {
+                        if (folderDialog.ShowDialog() == DialogResult.OK)
+                        {
+                            selectedPath = folderDialog.SelectedPath;
+                            if (Directory.Exists(Path.Combine(selectedPath, "mods")) && Directory.Exists(Path.Combine(selectedPath, "config")))
+                            {
+                                validFolder = true;
+                                break;
+                            }
+                            else
+                            {
+                                MessageBox.Show("The selected folder does not appear to be a valid Minecraft modpack folder. Please select a folder containing 'mods' and 'config' directories.", "Invalid Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            }
+                        }
+                        else
+                        {
+                            MessageBox.Show("Minecraft path is required. Application will exit.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Application.Exit();
+                            return "";
+                        }
+                    } while (!validFolder);
+
+                    // Save the selected path to config
+                    this.MinecraftPath = selectedPath;
+                    return selectedPath;
+                }
             }
             set
             {
@@ -81,7 +119,7 @@ namespace HLMCUpdater
 
                 // --- Main Form Setup ---
                 this.Text = "HLMC Mod Updater";
-                this.Size = new Size(500, 350); // Reduced size, increased height for better button spacing
+                this.Size = new Size(650, 350); // Reduced size, increased height for better button spacing
                 this.StartPosition = FormStartPosition.CenterScreen;
                 this.FormBorderStyle = FormBorderStyle.FixedDialog;
                 this.MaximizeBox = false;
@@ -102,6 +140,7 @@ namespace HLMCUpdater
                 Text = "Holy Lois Client Updater",
                 Font = new Font("Arial", 24, FontStyle.Bold),
                 AutoSize = true,
+                Anchor = AnchorStyles.Top,
                 ForeColor = Color.Gold
             };
             welcomePanel.Controls.Add(titleLabel);
@@ -111,6 +150,7 @@ namespace HLMCUpdater
                 Text = "created by pjampjam ( ͡° ͜ʖ ͡°)",
                 Font = new Font("Arial", 10),
                 AutoSize = true,
+                Anchor = AnchorStyles.Top,
                 ForeColor = Color.FromArgb(80, 80, 80)
             };
             welcomePanel.Controls.Add(creditLabel);
@@ -120,6 +160,7 @@ namespace HLMCUpdater
                 Text = "Update Modpack",
                 Size = new Size(220, 50),
                 Font = new Font("Arial", 13, FontStyle.Bold),
+                Anchor = AnchorStyles.Top,
                 BackColor = Color.FromArgb(60, 180, 75),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat
@@ -136,6 +177,8 @@ namespace HLMCUpdater
                 Text = ProgramVersion,
                 Font = new Font("Arial", 10),
                 AutoSize = true,
+                Anchor = AnchorStyles.Bottom,
+                Location = new Point(0, 100),
                 ForeColor = Color.FromArgb(80, 80, 80)
             };
             welcomePanel.Controls.Add(versionLabel);
@@ -149,7 +192,8 @@ namespace HLMCUpdater
                 Text = "Initializing...",
                 Font = new Font("Arial", 14, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(0, 120),
+                Anchor = AnchorStyles.Top,
+                Location = new Point(0, 100),
                 ForeColor = Color.Gold
             };
             progressPanel.Controls.Add(statusLabel);
@@ -157,18 +201,21 @@ namespace HLMCUpdater
             downloadProgressBar = new ProgressBar
             {
                 Size = new Size(500, 25),
-                Location = new Point(40, 190),
+                Anchor = AnchorStyles.Top,
+                Location = new Point(40, 380),
                 Visible = false
             };
             progressPanel.Controls.Add(downloadProgressBar);
 
             downloadProgressLabel = new Label
             {
-                Location = new Point(0, 220),
+                Anchor = AnchorStyles.Top,
+                Location = new Point(0, 200),
                 Font = new Font("Arial", 9),
                 Text = "",
                 Visible = false,
-                ForeColor = Color.White
+                ForeColor = Color.White,
+                AutoSize = true
             };
             progressPanel.Controls.Add(downloadProgressLabel);
 
@@ -177,14 +224,19 @@ namespace HLMCUpdater
                 Text = "Cancel",
                 Size = new Size(120, 40),
                 Font = new Font("Arial", 10),
+                Anchor = AnchorStyles.Bottom,
                 BackColor = Color.FromArgb(180, 60, 60),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Location = new Point((progressPanel.Width - 120) / 2, progressPanel.Height - 60)
+                Location = new Point((progressPanel.Width - 120) / 2, progressPanel.Height)
             };
             cancelButton.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 50);
             cancelButton.FlatAppearance.BorderSize = 2;
-            cancelButton.Click += (s, e) => _cts?.Cancel();
+            cancelButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 80, 80);
+            cancelButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(150, 40, 40);
+            cancelButton.MouseEnter += (s, e) => cancelButton.BackColor = Color.FromArgb(200, 80, 80);
+            cancelButton.MouseLeave += (s, e) => cancelButton.BackColor = Color.FromArgb(180, 60, 60);
+            cancelButton.Click += async (s, e) => await CancelDownload(s, e);
             progressPanel.Controls.Add(cancelButton);
 
             // --- Summary View Controls ---
@@ -196,6 +248,8 @@ namespace HLMCUpdater
                 Text = "Update Complete!",
                 Font = new Font("Arial", 16, FontStyle.Bold),
                 AutoSize = true,
+                Anchor = AnchorStyles.Top,
+                Location = new Point(0, 20),
                 ForeColor = Color.Gold
             };
             summaryPanel.Controls.Add(summaryTitleLabel);
@@ -205,6 +259,8 @@ namespace HLMCUpdater
                 Text = "",
                 Font = new Font("Arial", 10),
                 AutoSize = true,
+                Anchor = AnchorStyles.Top,
+                Location = new Point(0, 50),
                 ForeColor = Color.White
             };
             summaryPanel.Controls.Add(summaryCountLabel);
@@ -216,7 +272,8 @@ namespace HLMCUpdater
                 ReadOnly = true,
                 Font = new Font("Arial", 9),
                 Size = new Size(460, 120),
-                Location = new Point((summaryPanel.Width - 460) / 2, 80),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point((summaryPanel.Width - 460) / 2, 200),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(40, 40, 40), // Match panel background
                 BorderStyle = BorderStyle.None // Remove border
@@ -228,10 +285,11 @@ namespace HLMCUpdater
                 Text = "Close",
                 Size = new Size(120, 40),
                 Font = new Font("Arial", 10),
+                Anchor = AnchorStyles.Bottom,
                 BackColor = Color.FromArgb(60, 180, 75),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Location = new Point((summaryPanel.Width - 120) / 2, summaryPanel.Height - 60)
+                Location = new Point((summaryPanel.Width - 120) / 2, summaryPanel.Height)
             };
             closeButton.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 50);
             closeButton.FlatAppearance.BorderSize = 2;
@@ -245,6 +303,7 @@ namespace HLMCUpdater
             };
 
             this.Load += MainForm_Load;
+            this.Resize += new EventHandler(this.MainForm_Resize);
         }
         private static void LogException(Exception ex)
         {
@@ -258,6 +317,92 @@ namespace HLMCUpdater
                 // If logging fails, ignore
             }
         }
+
+        private async Task CancelDownload(object? sender, EventArgs e)
+        {
+            cancelButton.Enabled = false;
+            UpdateStatus("Stopping...");
+            _cts?.Cancel();
+
+            // Delete currently downloading files with retry
+            foreach (var file in currentDownloads)
+            {
+                UpdateStatus("Deleting " + Path.GetFileName(file));
+                int attempts = 0;
+                while (attempts < 10 && File.Exists(file))
+                {
+                    try
+                    {
+                        File.Delete(file);
+                        break;
+                    }
+                    catch
+                    {
+                        attempts++;
+                        if (attempts < 10)
+                        {
+                            await Task.Delay(200);
+                        }
+                    }
+                }
+            }
+            currentDownloads.Clear();
+
+            UpdateStatus("Deletion successful");
+
+            // Force immediate cleanup
+            try
+            {
+                string tempDir = Path.Combine(Path.GetTempPath(), "HLMC_Updater_Temp");
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+
+                // Also clean up potentially corrupted downloads in main directories
+                string scriptRoot = MinecraftPath;
+                if (!string.IsNullOrEmpty(scriptRoot))
+                {
+                    CleanupIncompleteDownloads(scriptRoot, "mods", "*.jar");
+                    CleanupIncompleteDownloads(scriptRoot, "resourcepacks", "*.zip");
+                }
+            }
+            catch { }
+
+            // Give cleanup operations time to complete before exiting
+            await Task.Delay(500);
+
+            Application.Exit();
+        }
+
+        private void CleanupIncompleteDownloads(string minecraftPath, string folderName, string filePattern)
+        {
+            try
+            {
+                string targetDir = Path.Combine(minecraftPath, folderName);
+                if (!Directory.Exists(targetDir)) return;
+
+                var files = Directory.GetFiles(targetDir, filePattern);
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        // Check if file seems incomplete (very small size or recently modified)
+                        FileInfo fi = new FileInfo(file);
+                        long fileSize = fi.Length;
+
+                        // If file is very small (< 100KB) or was modified in the last 30 seconds, it's likely incomplete
+                        if (fileSize < 100 * 1024 || (DateTime.Now - fi.LastWriteTime).TotalSeconds < 30)
+                        {
+                            File.Delete(file);
+                        }
+                    }
+                    catch { } // Ignore errors for individual files
+                }
+            }
+            catch { } // Ignore directory-level errors
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -293,6 +438,7 @@ namespace HLMCUpdater
 
                 using (var client = new HttpClient())
                 {
+                    client.Timeout = TimeSpan.FromMinutes(30); // Allow longer downloads for large files
                     // --- Sync all folders ---
                     await SyncFolder("mods", "*.jar", repoTree, results, scriptRoot, client);
                     await SyncFolder("resourcepacks", "*.zip", repoTree, results, scriptRoot, client);
@@ -305,14 +451,16 @@ namespace HLMCUpdater
 
                     try
                     {
+                        currentDownloads.Add(tempZipPath);
                         var response = await client.GetAsync(zipUrl);
                         response.EnsureSuccessStatusCode();
 
-                        using (var stream = await response.Content.ReadAsStreamAsync())
+                        using (var stream = await response.Content.ReadAsStreamAsync(_cts.Token))
                         using (var fileStream = File.OpenWrite(tempZipPath))
                         {
-                            await stream.CopyToAsync(fileStream);
+                            await stream.CopyToAsync(fileStream, _cts.Token);
                         }
+                        currentDownloads.Remove(tempZipPath);
                     }
                     catch { results.Status = "WARNING"; }
 
@@ -322,7 +470,9 @@ namespace HLMCUpdater
                         downloadProgressBar.Visible = true;
                         downloadProgressBar.Style = ProgressBarStyle.Marquee;
                         downloadProgressLabel.Visible = true;
+                        
                         downloadProgressLabel.Text = "Expanding config.zip...";
+                        CenterControlX(downloadProgressLabel, progressPanel);
 
                         await Task.Run(() => ZipFile.ExtractToDirectory(tempZipPath, tempUnzipDir, true));
 
@@ -373,7 +523,9 @@ namespace HLMCUpdater
             {
                 summaryTitleLabel.Text = "Update Failed!";
                 summaryTitleLabel.ForeColor = Color.Red;
+                CenterControlX(summaryTitleLabel, summaryPanel);
                 summaryCountLabel.Text = "An error occurred during the update.";
+                CenterControlX(summaryCountLabel, summaryPanel);
                 summaryTextBox.Text = results.Error + "\r\n\r\nError details saved to HLMC_updater_error.txt";
                 summaryTextBox.Visible = true;
             }
@@ -388,21 +540,27 @@ namespace HLMCUpdater
                 {
                     summaryTitleLabel.Text = "No updates were found.";
                     summaryTitleLabel.ForeColor = Color.Gray;
+                    CenterControlX(summaryTitleLabel, summaryPanel);
                     summaryCountLabel.Text = "";
+                    CenterControlX(summaryCountLabel, summaryPanel);
                     summaryTextBox.Visible = false;
                 }
                 else if (results.Status == "WARNING")
                 {
                     summaryTitleLabel.Text = "Update Complete (with warnings)";
                     summaryTitleLabel.ForeColor = Color.Orange;
+                    CenterControlX(summaryTitleLabel, summaryPanel);
                     summaryCountLabel.Text = "Config.zip not found on repository. Other items were synced.";
+                    CenterControlX(summaryCountLabel, summaryPanel);
                     summaryTextBox.Visible = true;
                 }
                 else
                 {
                     summaryTitleLabel.Text = "Update Complete!";
                     summaryTitleLabel.ForeColor = Color.Green;
+                    CenterControlX(summaryTitleLabel, summaryPanel);
                     summaryCountLabel.Text = $"Mods: {addedMods} added, {removedMods} removed. Resource Packs: {addedPacks} added, {removedPacks} removed.";
+                    CenterControlX(summaryCountLabel, summaryPanel);
                     summaryTextBox.Visible = true;
                 }
 
@@ -433,38 +591,102 @@ namespace HLMCUpdater
         private void UpdateStatus(string text)
         {
             statusLabel.Text = text;
+            CenterControlX(statusLabel, progressPanel);
             this.Refresh();
         }
 
         private async Task<List<RepoItem>> FetchRepoTree()
         {
+            string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            string cacheFile = Path.Combine(exeDir, "repoTreeCache.json");
+            if (File.Exists(cacheFile))
+            {
+                try
+                {
+                    string cacheJson = File.ReadAllText(cacheFile);
+                    var cache = JsonSerializer.Deserialize<CacheData>(cacheJson);
+                    if (cache != null && cache.Items != null && DateTime.Now - cache.LastUpdate < TimeSpan.FromHours(1))
+                    {
+                        UpdateStatus("Using cached repository data.");
+                        return cache.Items!;
+                    }
+                }
+                catch { } // ignore corrupted cache
+            }
+
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                if (!string.IsNullOrEmpty(GitHubToken))
+                {
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                }
                 string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=1";
-                var json = await client.GetStringAsync(apiUrl);
-                
-                var options = new JsonSerializerOptions
+                int maxRetries = 5;
+                int attempt = 0;
+                while (attempt < maxRetries)
                 {
-                    PropertyNameCaseInsensitive = true
-                };
-                
-                var doc = JsonDocument.Parse(json);
-                var tree = doc.RootElement.GetProperty("tree");
-                var items = new List<RepoItem>();
-                foreach (var item in tree.EnumerateArray())
-                {
-                    var repoItem = new RepoItem
+                    try
                     {
-                        path = item.GetProperty("path").GetString(),
-                        type = item.GetProperty("type").GetString()
-                    };
-                    if (!string.IsNullOrEmpty(repoItem.path))
+                        UpdateStatus($"Fetching repository file list... (attempt {attempt + 1})");
+                        var response = await client.GetAsync(apiUrl);
+                        if (response.IsSuccessStatusCode)
+                        {
+                            string json = await response.Content.ReadAsStringAsync();
+                            var options = new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            };
+                            var doc = JsonDocument.Parse(json);
+                            var tree = doc.RootElement.GetProperty("tree");
+                            var items = new List<RepoItem>();
+                            foreach (var item in tree.EnumerateArray())
+                            {
+                                var repoItem = new RepoItem
+                                {
+                                    path = item.GetProperty("path").GetString(),
+                                    type = item.GetProperty("type").GetString()
+                                };
+                                if (!string.IsNullOrEmpty(repoItem.path))
+                                {
+                                    items.Add(repoItem);
+                                }
+                            }
+                            // save to cache
+                            var cacheData = new CacheData { LastUpdate = DateTime.Now, Items = items };
+                            string cacheJsonToSave = JsonSerializer.Serialize(cacheData);
+                            File.WriteAllText(cacheFile, cacheJsonToSave);
+                            return items;
+                        }
+                        else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                        {
+                            int delay = (int)Math.Pow(2, attempt) * 1000;
+                            int remaining = delay / 1000;
+                            for(; remaining > 0; remaining--)
+                            {
+                                UpdateStatus($"Rate limited - retrying in {remaining}s ({attempt + 1}/{maxRetries})");
+                                await Task.Delay(1000);
+                            }
+                            attempt++;
+                        }
+                        else
+                        {
+                            throw new HttpRequestException($"GitHub API error: {response.StatusCode}");
+                        }
+                    }
+                    catch (Exception) when (attempt < maxRetries - 1)
                     {
-                        items.Add(repoItem);
+                        int delay = (int)Math.Pow(2, attempt) * 1000;
+                        int remaining = delay / 1000;
+                        for(; remaining > 0; remaining--)
+                        {
+                            UpdateStatus($"Network error - retrying in {remaining}s ({attempt + 2}/{maxRetries})");
+                            await Task.Delay(1000);
+                        }
+                        attempt++;
                     }
                 }
-                return items;
+                throw new Exception("Max retries exceeded");
             }
         }
 
@@ -512,8 +734,10 @@ namespace HLMCUpdater
                 results.Added.Add($"{itemType}: {itemName}");
                 string itemPath = $"{folderName}/{itemName}";
                 string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{itemPath}";
+                string destination = Path.Combine(localDirPath, itemName!);
+                currentDownloads.Add(destination);
                 UpdateStatus($"Downloading {itemType}: {itemName}");
-                await DownloadFileWithProgress(downloadUrl, Path.Combine(localDirPath, itemName!), _cts.Token, client);
+                await DownloadFileWithProgress(downloadUrl, destination, _cts.Token, client);
             }
         }
 
@@ -523,6 +747,7 @@ namespace HLMCUpdater
             downloadProgressLabel.Visible = true;
             downloadProgressBar.Value = 0;
             downloadProgressLabel.Text = "Starting download...";
+            CenterControlX(downloadProgressLabel, progressPanel);
 
             try
             {
@@ -536,9 +761,10 @@ namespace HLMCUpdater
                     using (var stream = await response.Content.ReadAsStreamAsync(cancellationToken))
                     using (var fileStream = File.Open(destination, FileMode.Create))
                     {
-                        byte[] buffer = new byte[8192];
+                        byte[] buffer = new byte[65536]; // Increased buffer for faster downloads
                         int bytesRead;
                         long totalRead = 0;
+                        var lastUpdateTime = DateTime.Now;
 
                         while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
                         {
@@ -546,32 +772,53 @@ namespace HLMCUpdater
                             fileStream.Write(buffer, 0, bytesRead);
                             totalRead += bytesRead;
 
-                            if (totalBytes > 0)
+                            // Throttle UI updates to once every 2ms (1/10 second)
+                            if ((DateTime.Now - lastUpdateTime).TotalMilliseconds >= 2)
                             {
-                                downloadProgressBar.Value = (int)Math.Min(totalRead, downloadProgressBar.Maximum);
-                                double mbRead = Math.Round(totalRead / 1048576.0, 2);
-                                double mbTotal = Math.Round(totalBytes / 1048576.0, 2);
-                                downloadProgressLabel.Text = $"{mbRead} MB / {mbTotal} MB downloaded";
+                                if (totalBytes > 0)
+                                {
+                                    downloadProgressBar.Value = (int)Math.Min(totalRead, downloadProgressBar.Maximum);
+                                    double mbRead = Math.Round(totalRead / 1048576.0, 2);
+                                    double mbTotal = Math.Round(totalBytes / 1048576.0, 2);
+                                    downloadProgressLabel.Text = $"{mbRead:F2} MB / {mbTotal:F2} MB downloaded";
+                                    CenterControlX(downloadProgressLabel, progressPanel);
+                                }
+                                else
+                                {
+                                    downloadProgressLabel.Text = string.Format("{0:F2} MB downloaded", Math.Round(totalRead / 1048576.0, 2));
+                                    CenterControlX(downloadProgressLabel, progressPanel);
+                                }
+                                this.Refresh();
+                                lastUpdateTime = DateTime.Now;
                             }
-                            else
-                            {
-                                downloadProgressLabel.Text = $"{Math.Round(totalRead / 1048576.0, 2)} MB downloaded";
-                            }
-                            this.Refresh();
                         }
                     }
                 }
             }
             catch (OperationCanceledException)
             {
-                // Clean up partially downloaded file
-                if (File.Exists(destination))
+                // Clean up partially downloaded file with retry
+                int attempts = 0;
+                while (attempts < 10 && File.Exists(destination))
                 {
-                    try { File.Delete(destination); } catch { }
+                    try
+                    {
+                        File.Delete(destination);
+                        break;
+                    }
+                    catch
+                    {
+                        attempts++;
+                        if (attempts < 10)
+                        {
+                            Thread.Sleep(200);
+                        }
+                    }
                 }
                 throw;
             }
 
+            currentDownloads.Remove(destination);
             downloadProgressBar.Visible = false;
             downloadProgressLabel.Visible = false;
         }
@@ -598,6 +845,10 @@ namespace HLMCUpdater
                 using (var client = new HttpClient())
                 {
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                    if (!string.IsNullOrEmpty(GitHubToken))
+                    {
+                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                    }
                     string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
                     var json = await client.GetStringAsync(apiUrl);
                     var release = JsonSerializer.Deserialize<GitHubRelease>(json);
@@ -610,10 +861,11 @@ namespace HLMCUpdater
                             Text = "Update Updater",
                             Size = new Size(220, 50),
                             Font = new Font("Segoe UI", 13, FontStyle.Bold),
+                            Anchor = AnchorStyles.Top,
                             BackColor = Color.FromArgb(60, 180, 75),
                             ForeColor = Color.White,
                             FlatStyle = FlatStyle.Flat,
-                            Location = new Point((welcomePanel.Width - 220) / 2, 200)
+                            Location = new Point((welcomePanel.Width - 220) / 2, 400)
                         };
                         updateButton.FlatAppearance.BorderColor = Color.FromArgb(70, 120, 70);
                         updateButton.FlatAppearance.BorderSize = 2;
@@ -723,37 +975,36 @@ namespace HLMCUpdater
         }
         private async void MainForm_Load(object? sender, EventArgs e)
         {
-            // Position controls - consistent centering like welcome screen
-            titleLabel.Location = new Point((welcomePanel.Width - titleLabel.Width) / 2, 60);
-            creditLabel.Location = new Point((welcomePanel.Width - creditLabel.Width) / 2, 120);
-            startButton.Location = new Point((welcomePanel.Width - startButton.Width) / 2, 200);
-            versionLabel.Location = new Point((welcomePanel.Width - versionLabel.Width) / 2, this.Height - versionLabel.Height - 50);
-
-            // Center progress controls with consistent method
-            statusLabel.Location = new Point((progressPanel.Width - statusLabel.Width) / 2, 120);
-            downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, 173);
-            downloadProgressLabel.Location = new Point((progressPanel.Width - downloadProgressLabel.Width) / 2, 208);
-
-            // Center summary controls with consistent method
-            summaryTitleLabel.Location = new Point((summaryPanel.Width - summaryTitleLabel.Width) / 2, 20);
-            summaryCountLabel.Location = new Point((summaryPanel.Width - summaryCountLabel.Width) / 2, 110);
-            summaryTextBox.Size = new Size(460, 150);
-            summaryTextBox.Location = new Point((summaryPanel.Width - summaryTextBox.Width) / 2, 150);
-
-            // Center entire progress group vertically
-            downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, 173);
-            downloadProgressLabel.Location = new Point(0, 208); // Better centering
-
-            // Center entire summary group vertically
-            summaryCountLabel.Location = new Point(0, 110);
-            summaryTextBox.Size = new Size(460, 150);
-            summaryTextBox.Location = new Point((summaryPanel.Width - summaryTextBox.Width) / 2, 150);
-
-            // Lower cancel and close buttons
-            cancelButton.Location = new Point((progressPanel.Width - 120) / 2, progressPanel.Height - 50);
-            closeButton.Location = new Point((summaryPanel.Width - 120) / 2, summaryPanel.Height - 50);
-
+            MainForm_Resize(sender, e);
             await CheckForUpdaterUpdatesOnStartup();
+        }
+
+        private void MainForm_Resize(object? sender, EventArgs e)
+        {
+            // Welcome Panel
+            titleLabel.Location = new Point((welcomePanel.Width - titleLabel.Width) / 2, 80);
+            creditLabel.Location = new Point((welcomePanel.Width - creditLabel.Width) / 2, titleLabel.Bottom + 10);
+            startButton.Location = new Point((welcomePanel.Width - startButton.Width) / 2, creditLabel.Bottom + 50);
+            versionLabel.Location = new Point((welcomePanel.Width - versionLabel.Width) / 2, welcomePanel.Height - versionLabel.Height - 10);
+
+            // Progress Panel
+            CenterControlX(statusLabel, progressPanel);
+            downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, statusLabel.Bottom + 40);
+            CenterControlX(downloadProgressLabel, progressPanel);
+            cancelButton.Location = new Point((progressPanel.Width - cancelButton.Width) / 2, progressPanel.Height - 70);
+
+            // Summary Panel
+            CenterControlX(summaryTitleLabel, summaryPanel);
+            CenterControlX(summaryCountLabel, summaryPanel);
+            summaryTextBox.Location = new Point(20, summaryCountLabel.Bottom + 20);
+            summaryTextBox.Size = new Size(summaryPanel.Width - 40, 150);
+            closeButton.Location = new Point((summaryPanel.Width - closeButton.Width) / 2, summaryPanel.Height - 50);
+        }
+
+        private void CenterControlX(Control control, Panel panel)
+        {
+            int x = Math.Max(0, (panel.Width - control.Width) / 2);
+            control.Location = new Point(x, control.Location.Y);
         }
 
         private async Task CheckForUpdaterUpdatesOnStartup()
@@ -764,34 +1015,64 @@ namespace HLMCUpdater
                 {
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
                     string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
-                    var json = await client.GetStringAsync(apiUrl);
-                    var release = JsonSerializer.Deserialize<GitHubRelease>(json);
-
-                    if (release?.Assets?.Count > 0 && release.TagName != ProgramVersion)
+                    int maxRetries = 3;
+                    int attempt = 0;
+                    while (attempt < maxRetries)
                     {
-                        // Replace the modpack update button with updater update button
-                        welcomePanel.Controls.Remove(startButton);
-
-                        var updateButton = new Button
+                        try
                         {
-                            Text = "Update Updater",
-                            Size = new Size(220, 50),
-                            Font = new Font("Arial", 13, FontStyle.Bold),
-                            BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
-                            ForeColor = Color.White,
-                            FlatStyle = FlatStyle.Flat,
-                            Location = new Point((welcomePanel.Width - 220) / 2, 160)
-                        };
-                        updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
-                        updateButton.FlatAppearance.BorderSize = 2;
-                        updateButton.Click += async (s, e) =>
-                        {
-                            if (release.Assets != null && release.Assets.Count > 0 && !string.IsNullOrEmpty(release.Assets[0].BrowserDownloadUrl))
+                            var response = await client.GetAsync(apiUrl);
+                            if (response.IsSuccessStatusCode)
                             {
-                                await DownloadUpdaterUpdate(release.Assets[0].BrowserDownloadUrl!);
+                                string json = await response.Content.ReadAsStringAsync();
+                                var release = JsonSerializer.Deserialize<GitHubRelease>(json);
+
+                                if (release?.Assets?.Count > 0 && release.TagName != ProgramVersion)
+                                {
+                                    // Replace the modpack update button with updater update button
+                                    welcomePanel.Controls.Remove(startButton);
+
+                                    var updateButton = new Button
+                                    {
+                                        Text = "Update Updater",
+                                        Size = new Size(220, 50),
+                                        Font = new Font("Arial", 13, FontStyle.Bold),
+                                        Anchor = AnchorStyles.Top,
+                                        BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
+                                        ForeColor = Color.White,
+                                        FlatStyle = FlatStyle.Flat,
+                                        Location = new Point((welcomePanel.Width - 220) / 2, 320)
+                                    };
+                                    updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
+                                    updateButton.FlatAppearance.BorderSize = 2;
+                                    updateButton.Click += async (s, e) =>
+                                    {
+                                        if (release.Assets != null && release.Assets.Count > 0 && !string.IsNullOrEmpty(release.Assets[0].BrowserDownloadUrl))
+                                        {
+                                            await DownloadUpdaterUpdate(release.Assets[0].BrowserDownloadUrl!);
+                                        }
+                                    };
+                                    welcomePanel.Controls.Add(updateButton);
+                                }
+                                break;
                             }
-                        };
-                        welcomePanel.Controls.Add(updateButton);
+                            else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                            {
+                                int delay = (int)Math.Pow(2, attempt) * 1000;
+                                await Task.Delay(delay);
+                                attempt++;
+                            }
+                            else
+                            {
+                                break; // non-retryable
+                            }
+                        }
+                        catch (Exception) when (attempt < maxRetries - 1)
+                        {
+                            int delay = (int)Math.Pow(2, attempt) * 1000;
+                            await Task.Delay(delay);
+                            attempt++;
+                        }
                     }
                 }
             }
@@ -805,6 +1086,12 @@ namespace HLMCUpdater
         {
             public string? path { get; set; }
             public string? type { get; set; }
+        }
+
+        class CacheData
+        {
+            public DateTime LastUpdate { get; set; }
+            public List<RepoItem>? Items { get; set; }
         }
 
         class SyncResults

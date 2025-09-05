@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCopyrightAttribute("© 2025 pjampjam innovations™")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Updater for the Holy Lois Minecraft modpack.")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.0.0+8741407433e01a7e4b30e545d2dcc9dd2611f186")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.0.0+3d04bcd6af066d9109e8a200f2cda4441a51fb53")]
 [assembly: System.Reflection.AssemblyProductAttribute("Holy Lois Client Updater")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Holy Lois Updater")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.1.0.0")]
