@@ -1142,9 +1142,31 @@ namespace HLMCUpdater
                     BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
                     ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
-                    Location = new Point((welcomePanel.Width - 220) / 2, 320)
+                    Location = new Point((welcomePanel.Width - 220) / 2, creditLabel.Bottom + 50) // Same position as original start button
                 };
                 updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
+                updateButton.FlatAppearance.BorderSize = 2;
+                updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
+                welcomePanel.Controls.Add(updateButton);
+                return true;
+            }
+            else if (remoteVersion == currentVersion && File.Exists(Path.Combine(exeDir, "FORCE_UPDATE_TEST")))
+            {
+                // Debug mode: Force show update button for testing even when versions match
+                welcomePanel.Controls.Remove(startButton);
+
+                var updateButton = new Button
+                {
+                    Text = "[TEST] Update Updater",
+                    Size = new Size(220, 50),
+                    Font = new Font("Arial", 13, FontStyle.Bold),
+                    Anchor = AnchorStyles.Top,
+                    BackColor = Color.FromArgb(255, 0, 255), // Magenta for test mode
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    Location = new Point((welcomePanel.Width - 220) / 2, creditLabel.Bottom + 50)
+                };
+                updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 0, 200);
                 updateButton.FlatAppearance.BorderSize = 2;
                 updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
                 welcomePanel.Controls.Add(updateButton);
