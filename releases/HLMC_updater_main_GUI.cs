@@ -24,11 +24,15 @@ namespace HLMCUpdater
         const string GitHubOwner = "pjampjam";
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
-        const string ProgramVersion = "v1.1.0.0";
-        const string GitHubToken = "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"; // Set your GitHub Personal Access Token here to bypass rate limits
+        const string GitHubToken = ""; // No API token needed for basic usage
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
+
+        #pragma warning disable CS8618
+        private static string _programVersion;
+        private static string ProgramVersion => _programVersion;
+        #pragma warning restore CS8618
 
         Panel welcomePanel, progressPanel, summaryPanel;
         Label titleLabel, creditLabel, versionLabel, statusLabel, downloadProgressLabel, summaryTitleLabel, summaryCountLabel;
@@ -853,7 +857,7 @@ namespace HLMCUpdater
                     var json = await client.GetStringAsync(apiUrl);
                     var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
-                    if (release?.Assets?.Count > 0 && release.TagName != ProgramVersion)
+                    if (release?.Assets?.Count > 0 && release.TagName != File.ReadAllText("version.txt").Trim())
                     {
                         // Show update button
                         var updateButton = new Button
@@ -975,6 +979,7 @@ namespace HLMCUpdater
         }
         private async void MainForm_Load(object? sender, EventArgs e)
         {
+            _programVersion = "v" + File.ReadAllText("version.txt").Trim();
             MainForm_Resize(sender, e);
             await CheckForUpdaterUpdatesOnStartup();
         }
@@ -1027,7 +1032,7 @@ namespace HLMCUpdater
                                 string json = await response.Content.ReadAsStringAsync();
                                 var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
-                                if (release?.Assets?.Count > 0 && release.TagName != ProgramVersion)
+                                if (release?.Assets?.Count > 0 && release.TagName != File.ReadAllText("version.txt").Trim())
                                 {
                                     // Replace the modpack update button with updater update button
                                     welcomePanel.Controls.Remove(startButton);
