@@ -1022,6 +1022,13 @@ namespace HLMCUpdater
         {
             _programVersion = "v" + EmbeddedVersion;
 
+            // Show welcome panel immediately with checking status
+            welcomePanel.Visible = true;
+            updateStatusLabel.Text = "🔄 Checking for updater updates...";
+            updateStatusLabel.ForeColor = Color.Gold;
+            updateStatusLabel.Visible = true;
+            CenterControlX(updateStatusLabel, welcomePanel);
+
             // Cleanup any orphaned backup files from previous updates
             CleanupOrphanedBackupFiles();
 
@@ -1029,12 +1036,10 @@ namespace HLMCUpdater
             string mcPath = GetMinecraftPathWithoutPrompt();
             bool updateAvailable = await CheckForUpdaterUpdatesOnStartup(mcPath);
 
-            welcomePanel.Visible = true; // Show after update check
-
+            // Update status based on results
             Color statusColor = updateAvailable ? Color.Green : Color.Gray;
-            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "";
+            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "✓ No updates available";
             updateStatusLabel.ForeColor = statusColor;
-            updateStatusLabel.Visible = true;
             CenterControlX(updateStatusLabel, welcomePanel);
 
             await Task.Delay(3000); // 3 second delay before hiding
@@ -1098,6 +1103,22 @@ namespace HLMCUpdater
                     // Note: Removed authorization header for public repository call
                     string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=true";
                     steps.Add($"Step 3: Fetching GitHub tree from {apiUrl}");
+
+                    // Update UI status for user feedback
+                    if (InvokeRequired)
+                    {
+                        Invoke(new Action(() =>
+                        {
+                            updateStatusLabel.Text = "🔄 Fetching latest version info...";
+                            CenterControlX(updateStatusLabel, welcomePanel);
+                        }));
+                    }
+                    else
+                    {
+                        updateStatusLabel.Text = "🔄 Fetching latest version info...";
+                        CenterControlX(updateStatusLabel, welcomePanel);
+                    }
+
                     var json = await client.GetStringAsync(apiUrl);
                     steps.Add($"Step 3: Received JSON response ({json.Length} characters)");
                     var tree = JsonSerializer.Deserialize<GitHubTree>(json);
@@ -1114,6 +1135,22 @@ namespace HLMCUpdater
                             steps.Add($"Step 4: Found exe at {downloadUrl}");
 
                             steps.Add("Step 5: Starting exe download");
+
+                            // Update UI status for download
+                            if (InvokeRequired)
+                            {
+                                Invoke(new Action(() =>
+                                {
+                                    updateStatusLabel.Text = "⬇️ Downloading update...";
+                                    CenterControlX(updateStatusLabel, welcomePanel);
+                                }));
+                            }
+                            else
+                            {
+                                updateStatusLabel.Text = "⬇️ Downloading update...";
+                                CenterControlX(updateStatusLabel, welcomePanel);
+                            }
+
                             using (var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
                             {
                                 response.EnsureSuccessStatusCode();
