@@ -24,7 +24,7 @@ namespace HLMCUpdater
         const string GitHubOwner = "pjampjam";
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
-        const string GitHubToken = "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"; // Provided for testing purposes
+        const string GitHubToken = ""; // Provided for testing purposes
         private static readonly string EmbeddedVersion = Assembly.GetExecutingAssembly().GetName().Version!.ToString();
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
