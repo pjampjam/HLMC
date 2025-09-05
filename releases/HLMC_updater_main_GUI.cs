@@ -117,6 +117,30 @@ namespace HLMCUpdater
             }
         }
 
+        private string GetMinecraftPathWithoutPrompt()
+        {
+            string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+
+            // Auto-detect if exe is in a Minecraft folder (has mods and config dirs)
+            if (Directory.Exists(Path.Combine(exeDir, "mods")) && Directory.Exists(Path.Combine(exeDir, "config")))
+            {
+                return exeDir;
+            }
+
+            // Try to get from config file
+            string configPath = Path.Combine(exeDir, "config.json");
+            if (File.Exists(configPath))
+            {
+                var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
+                if (config != null && config.TryGetValue("MinecraftPath", out var path) && !string.IsNullOrEmpty(path))
+                {
+                    return path;
+                }
+            }
+
+            return exeDir; // Default to exe dir
+        }
+
         public MainForm()
         {
             try
@@ -140,6 +164,7 @@ namespace HLMCUpdater
             // --- Welcome View Controls ---
             welcomePanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(40, 40, 40) };
             this.Controls.Add(welcomePanel);
+            welcomePanel.Visible = false; // Hide until update check is done
 
             titleLabel = new Label
             {
@@ -853,7 +878,7 @@ namespace HLMCUpdater
             }
         }
 
-        private async Task DownloadUpdaterUpdate()
+        private async Task DownloadUpdaterUpdate(string? localSource = null)
         {
             string? currentExe = Environment.ProcessPath;
             if (string.IsNullOrEmpty(currentExe))
@@ -863,34 +888,46 @@ namespace HLMCUpdater
             }
 
             string exeDir = Path.GetDirectoryName(currentExe)!;
-            string newExePath = Path.Combine(exeDir, "Holy Lois Updater new.exe");
+            string newExePath = localSource ?? Path.Combine(exeDir, "Holy Lois Updater new.exe");
             string backupExePath = Path.Combine(exeDir, "Holy Lois Updater.old.exe");
 
             try
             {
-                UpdateStatus("Fetching repository data for updater...");
-                var Items = await FetchRepoTree();
-                var exeItem = Items.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
-                if (exeItem?.path == null)
+                if (localSource != null)
                 {
-                    UpdateStatus("No updater exe found in repository");
-                    return;
-                }
-
-                string exeName = exeItem.path;
-                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
-
-                UpdateStatus("Downloading updater update...");
-
-                using (var client = new HttpClient())
-                {
-                    var response = await client.GetAsync(downloadUrl);
-                    response.EnsureSuccessStatusCode();
-
-                    using (var stream = await response.Content.ReadAsStreamAsync())
-                    using (var fileStream = File.OpenWrite(newExePath))
+                    if (!File.Exists(localSource))
                     {
-                        await stream.CopyToAsync(fileStream);
+                        UpdateStatus("Local update file not found");
+                        return;
+                    }
+                    UpdateStatus("Using local updater update...");
+                }
+                else
+                {
+                    UpdateStatus("Fetching repository data for updater...");
+                    var Items = await FetchRepoTree();
+                    var exeItem = Items.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
+                    if (exeItem?.path == null)
+                    {
+                        UpdateStatus("No updater exe found in repository");
+                        return;
+                    }
+
+                    string exeName = exeItem.path;
+                    string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
+
+                    UpdateStatus("Downloading updater update...");
+
+                    using (var client = new HttpClient())
+                    {
+                        var response = await client.GetAsync(downloadUrl);
+                        response.EnsureSuccessStatusCode();
+
+                        using (var stream = await response.Content.ReadAsStreamAsync())
+                        using (var fileStream = File.OpenWrite(newExePath))
+                        {
+                            await stream.CopyToAsync(fileStream);
+                        }
                     }
                 }
 
@@ -932,7 +969,7 @@ namespace HLMCUpdater
                 // Clean up on error
                 try
                 {
-                    if (File.Exists(newExePath)) File.Delete(newExePath);
+                    if (File.Exists(newExePath) && localSource == null) File.Delete(newExePath);
                 }
                 catch { }
             }
@@ -941,10 +978,13 @@ namespace HLMCUpdater
         {
             _programVersion = "v" + EmbeddedVersion;
             MainForm_Resize(sender, e);
-            bool updateAvailable = await CheckForUpdaterUpdatesOnStartup();
+            string mcPath = GetMinecraftPathWithoutPrompt();
+            bool updateAvailable = await CheckForUpdaterUpdatesOnStartup(mcPath);
+
+            welcomePanel.Visible = true; // Show after update check
 
             Color statusColor = updateAvailable ? Color.Green : Color.Gray;
-            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "";
+            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "No update for Updater detected";
             updateStatusLabel.ForeColor = statusColor;
             updateStatusLabel.Visible = true;
             CenterControlX(updateStatusLabel, welcomePanel);
@@ -981,76 +1021,45 @@ namespace HLMCUpdater
             control.Location = new Point(x, control.Location.Y);
         }
 
-        private async Task<bool> CheckForUpdaterUpdatesOnStartup()
+        private Task<bool> CheckForUpdaterUpdatesOnStartup(string mcPath)
         {
             try
             {
-                var Items = await FetchRepoTree();
-                var exeItem = Items.FirstOrDefault(x => x.type == "blob" && !x.path!.Contains('/') && x.path.EndsWith(".exe"));
-                if (exeItem?.path == null) return false;
+                string newExePath = Path.Combine(mcPath, "Holy Lois Updater.exe");
+                if (!File.Exists(newExePath)) return Task.FromResult(false);
 
-                string exeName = exeItem.path;
-                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
-                string tempExe = Path.Combine(Path.GetTempPath(), "remote_updater.exe");
-
-                try
+                string remoteVersion = FileVersionInfo.GetVersionInfo(newExePath).FileVersion ?? "";
+                if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != EmbeddedVersion)
                 {
-                    using (var client = new HttpClient())
-                    {
-                        client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
-                        using (var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
-                        {
-                            response.EnsureSuccessStatusCode();
-                            using (var stream = await response.Content.ReadAsStreamAsync())
-                            using (var fileStream = File.OpenWrite(tempExe))
-                            {
-                                await stream.CopyToAsync(fileStream);
-                            }
-                        }
-                    }
+                    // Replace the modpack update button with updater update button
+                    welcomePanel.Controls.Remove(startButton);
 
-                    string remoteVersion = FileVersionInfo.GetVersionInfo(tempExe).FileVersion ?? "";
-                    if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != EmbeddedVersion)
+                    var updateButton = new Button
                     {
-                        // Replace the modpack update button with updater update button
-                        welcomePanel.Controls.Remove(startButton);
-
-                        var updateButton = new Button
-                        {
-                            Text = "Update Updater",
-                            Size = new Size(220, 50),
-                            Font = new Font("Arial", 13, FontStyle.Bold),
-                            Anchor = AnchorStyles.Top,
-                            BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
-                            ForeColor = Color.White,
-                            FlatStyle = FlatStyle.Flat,
-                            Location = new Point((welcomePanel.Width - 220) / 2, 320)
-                        };
-                        updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
-                        updateButton.FlatAppearance.BorderSize = 2;
-                        updateButton.Click += async (s, e) => await DownloadUpdaterUpdate();
-                        welcomePanel.Controls.Add(updateButton);
-                        return true;
-                    }
-                    else
-                    {
-                        return false;
-                    }
+                        Text = "Update Updater",
+                        Size = new Size(220, 50),
+                        Font = new Font("Arial", 13, FontStyle.Bold),
+                        Anchor = AnchorStyles.Top,
+                        BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
+                        ForeColor = Color.White,
+                        FlatStyle = FlatStyle.Flat,
+                        Location = new Point((welcomePanel.Width - 220) / 2, 320)
+                    };
+                    updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
+                    updateButton.FlatAppearance.BorderSize = 2;
+                    updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(newExePath);
+                    welcomePanel.Controls.Add(updateButton);
+                    return Task.FromResult(true);
                 }
-                catch
+                else
                 {
-                    // Silently fail
-                    return false;
-                }
-                finally
-                {
-                    if (File.Exists(tempExe)) File.Delete(tempExe);
+                    return Task.FromResult(false);
                 }
             }
             catch (Exception)
             {
                 // Silently fail - just continue with normal operation
-                return false;
+                return Task.FromResult(false);
             }
         }
         // --- Helper Classes ---
