@@ -25,6 +25,7 @@ namespace HLMCUpdater
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
         const string GitHubToken = ""; // No API token needed for basic usage
+        const string EmbeddedVersion = "1.1.0.2";
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
@@ -178,11 +179,10 @@ namespace HLMCUpdater
 
             versionLabel = new Label
             {
-                Text = ProgramVersion,
+                Text = EmbeddedVersion,
                 Font = new Font("Arial", 10),
                 AutoSize = true,
                 Anchor = AnchorStyles.Bottom,
-                Location = new Point(0, 100),
                 ForeColor = Color.FromArgb(80, 80, 80)
             };
             welcomePanel.Controls.Add(versionLabel);
@@ -599,7 +599,7 @@ namespace HLMCUpdater
             this.Refresh();
         }
 
-        private async Task<List<RepoItem>> FetchRepoTree()
+        private Task<List<RepoItem>> FetchRepoTree()
         {
             string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             string cacheFile = Path.Combine(exeDir, "repoTreeCache.json");
@@ -609,89 +609,17 @@ namespace HLMCUpdater
                 {
                     string cacheJson = File.ReadAllText(cacheFile);
                     var cache = JsonSerializer.Deserialize<CacheData>(cacheJson);
-                    if (cache != null && cache.Items != null && DateTime.Now - cache.LastUpdate < TimeSpan.FromHours(1))
+                    if (cache != null && cache.Items != null)
                     {
                         UpdateStatus("Using cached repository data.");
-                        return cache.Items!;
+                        return Task.FromResult(cache.Items!);
                     }
                 }
                 catch { } // ignore corrupted cache
             }
 
-            using (var client = new HttpClient())
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
-                if (!string.IsNullOrEmpty(GitHubToken))
-                {
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
-                }
-                string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=1";
-                int maxRetries = 5;
-                int attempt = 0;
-                while (attempt < maxRetries)
-                {
-                    try
-                    {
-                        UpdateStatus($"Fetching repository file list... (attempt {attempt + 1})");
-                        var response = await client.GetAsync(apiUrl);
-                        if (response.IsSuccessStatusCode)
-                        {
-                            string json = await response.Content.ReadAsStringAsync();
-                            var options = new JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true
-                            };
-                            var doc = JsonDocument.Parse(json);
-                            var tree = doc.RootElement.GetProperty("tree");
-                            var items = new List<RepoItem>();
-                            foreach (var item in tree.EnumerateArray())
-                            {
-                                var repoItem = new RepoItem
-                                {
-                                    path = item.GetProperty("path").GetString(),
-                                    type = item.GetProperty("type").GetString()
-                                };
-                                if (!string.IsNullOrEmpty(repoItem.path))
-                                {
-                                    items.Add(repoItem);
-                                }
-                            }
-                            // save to cache
-                            var cacheData = new CacheData { LastUpdate = DateTime.Now, Items = items };
-                            string cacheJsonToSave = JsonSerializer.Serialize(cacheData);
-                            File.WriteAllText(cacheFile, cacheJsonToSave);
-                            return items;
-                        }
-                        else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                        {
-                            int delay = (int)Math.Pow(2, attempt) * 1000;
-                            int remaining = delay / 1000;
-                            for(; remaining > 0; remaining--)
-                            {
-                                UpdateStatus($"Rate limited - retrying in {remaining}s ({attempt + 1}/{maxRetries})");
-                                await Task.Delay(1000);
-                            }
-                            attempt++;
-                        }
-                        else
-                        {
-                            throw new HttpRequestException($"GitHub API error: {response.StatusCode}");
-                        }
-                    }
-                    catch (Exception) when (attempt < maxRetries - 1)
-                    {
-                        int delay = (int)Math.Pow(2, attempt) * 1000;
-                        int remaining = delay / 1000;
-                        for(; remaining > 0; remaining--)
-                        {
-                            UpdateStatus($"Network error - retrying in {remaining}s ({attempt + 2}/{maxRetries})");
-                            await Task.Delay(1000);
-                        }
-                        attempt++;
-                    }
-                }
-                throw new Exception("Max retries exceeded");
-            }
+            // Skip API call to avoid authentication issues - rely on cache only
+            throw new Exception("Repository cache not available. Please ensure repoTreeCache.json exists and is valid.");
         }
 
         private async Task SyncFolder(string folderName, string fileFilter, List<RepoItem> repoTree, SyncResults results, string scriptRoot, HttpClient client)
@@ -857,7 +785,7 @@ namespace HLMCUpdater
                     var json = await client.GetStringAsync(apiUrl);
                     var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
-                    if (release?.Assets?.Count > 0 && release.TagName != File.ReadAllText("version.txt").Trim())
+                    if (release?.Assets?.Count > 0 && release.TagName != EmbeddedVersion)
                     {
                         // Show update button
                         var updateButton = new Button
@@ -979,7 +907,7 @@ namespace HLMCUpdater
         }
         private async void MainForm_Load(object? sender, EventArgs e)
         {
-            _programVersion = "v" + File.ReadAllText("version.txt").Trim();
+            _programVersion = "v" + EmbeddedVersion;
             MainForm_Resize(sender, e);
             await CheckForUpdaterUpdatesOnStartup();
         }
@@ -990,7 +918,7 @@ namespace HLMCUpdater
             titleLabel.Location = new Point((welcomePanel.Width - titleLabel.Width) / 2, 80);
             creditLabel.Location = new Point((welcomePanel.Width - creditLabel.Width) / 2, titleLabel.Bottom + 10);
             startButton.Location = new Point((welcomePanel.Width - startButton.Width) / 2, creditLabel.Bottom + 50);
-            versionLabel.Location = new Point((welcomePanel.Width - versionLabel.Width) / 2, welcomePanel.Height - versionLabel.Height - 10);
+            versionLabel.Location = new Point((welcomePanel.Width - versionLabel.Width) / 2, startButton.Bottom + 40);
 
             // Progress Panel
             CenterControlX(statusLabel, progressPanel);
@@ -1032,7 +960,7 @@ namespace HLMCUpdater
                                 string json = await response.Content.ReadAsStringAsync();
                                 var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
-                                if (release?.Assets?.Count > 0 && release.TagName != File.ReadAllText("version.txt").Trim())
+                                if (release?.Assets?.Count > 0 && release.TagName != EmbeddedVersion)
                                 {
                                     // Replace the modpack update button with updater update button
                                     welcomePanel.Controls.Remove(startButton);

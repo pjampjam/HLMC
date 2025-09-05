@@ -13,14 +13,14 @@
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
 
-    <ApplicationIcon>updater.ico</ApplicationIcon>
-     <AssemblyName>Holy Lois Updater</AssemblyName>
-     <Product>Holy Lois Client Updater</Product>
-     <Description>Updater for the Holy Lois Minecraft modpack.</Description>
-     <Version>$([System.IO.File]::ReadAllText('version.txt'))</Version>
-     <FileVersion>$([System.IO.File]::ReadAllText('version.txt'))</FileVersion>
-     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-     <Copyright>© 2025 pjampjam innovations™</Copyright>
+    <ApplicationIcon>updater_main.ico</ApplicationIcon>
+    <AssemblyName>Holy Lois Updater</AssemblyName>
+    <Product>Holy Lois Client Updater</Product>
+    <Description>Updater for the Holy Lois Minecraft modpack.</Description>
+    <Version>1.1.0.2</Version>
+    <FileVersion>1.1.0.2</FileVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Copyright>© 2025 pjampjam innovations™</Copyright>
   </PropertyGroup>
 
 </Project>
