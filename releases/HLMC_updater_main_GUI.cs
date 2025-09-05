@@ -445,6 +445,41 @@ namespace HLMCUpdater
             catch { } // Ignore directory-level errors
         }
 
+        private void CleanupOrphanedBackupFiles()
+        {
+            try
+            {
+                string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                string? currentExe = Environment.ProcessPath;
+
+                if (string.IsNullOrEmpty(currentExe)) return;
+
+                string currentExeName = Path.GetFileName(currentExe);
+                string backupPattern = Path.GetFileNameWithoutExtension(currentExeName) + ".old.exe";
+                string backupPath = Path.Combine(exeDir, backupPattern);
+
+                // Check if backup file exists
+                if (File.Exists(backupPath))
+                {
+                    try
+                    {
+                        // Verify the backup file is older than current exe
+                        FileInfo currentFi = new FileInfo(currentExe);
+                        FileInfo backupFi = new FileInfo(backupPath);
+
+                        // Only clean up if backup is older (successful update scenario)
+                        if (backupFi.LastWriteTime < currentFi.LastWriteTime)
+                        {
+                            File.Delete(backupPath);
+                        }
+                        // If backup is newer, it might be from a failed update - keep it for manual inspection
+                    }
+                    catch { } // Ignore cleanup errors
+                }
+            }
+            catch { } // Ignore all errors during cleanup
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -986,6 +1021,10 @@ namespace HLMCUpdater
         private async void MainForm_Load(object? sender, EventArgs e)
         {
             _programVersion = "v" + EmbeddedVersion;
+
+            // Cleanup any orphaned backup files from previous updates
+            CleanupOrphanedBackupFiles();
+
             MainForm_Resize(sender, e);
             string mcPath = GetMinecraftPathWithoutPrompt();
             bool updateAvailable = await CheckForUpdaterUpdatesOnStartup(mcPath);
