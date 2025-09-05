@@ -1026,30 +1026,19 @@ namespace HLMCUpdater
             CleanupOrphanedBackupFiles();
 
             MainForm_Resize(sender, e);
-
-            // Show update check status while background check runs
-            welcomePanel.Visible = true;
-            updateStatusLabel.Text = "Checking for updater updates...";
-            updateStatusLabel.ForeColor = Color.Gold;
-            updateStatusLabel.Visible = true;
-            CenterControlX(updateStatusLabel, welcomePanel);
-            this.Refresh(); // Force UI update
-
             string mcPath = GetMinecraftPathWithoutPrompt();
             bool updateAvailable = await CheckForUpdaterUpdatesOnStartup(mcPath);
 
-            // Update status label based on check result
+            welcomePanel.Visible = true; // Show after update check
+
             Color statusColor = updateAvailable ? Color.Green : Color.Gray;
             updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "";
             updateStatusLabel.ForeColor = statusColor;
-            updateStatusLabel.Visible = !string.IsNullOrEmpty(updateStatusLabel.Text);
+            updateStatusLabel.Visible = true;
             CenterControlX(updateStatusLabel, welcomePanel);
 
-            if (updateAvailable)
-            {
-                await Task.Delay(3000); // 3 second delay before hiding success message
-                updateStatusLabel.Visible = false;
-            }
+            await Task.Delay(3000); // 3 second delay before hiding
+            updateStatusLabel.Visible = false;
         }
 
         private void MainForm_Resize(object? sender, EventArgs e)
