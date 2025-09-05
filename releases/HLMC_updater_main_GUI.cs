@@ -24,7 +24,7 @@ namespace HLMCUpdater
         const string GitHubOwner = "pjampjam";
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
-        const string GitHubToken = ""; // No API token needed for basic usage
+        const string GitHubToken = "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"; // Provided for testing purposes
         private static readonly string EmbeddedVersion = Assembly.GetExecutingAssembly().GetName().Version!.ToString();
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
@@ -660,8 +660,17 @@ namespace HLMCUpdater
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                if (!string.IsNullOrEmpty(GitHubToken))
+                {
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                }
                 string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=true";
-                string json = await client.GetStringAsync(apiUrl);
+                var httpResponse = await client.GetAsync(apiUrl);
+                string json = await httpResponse.Content.ReadAsStringAsync();
+                if (!httpResponse.IsSuccessStatusCode)
+                {
+                    throw new Exception($"GitHub API error {httpResponse.StatusCode}: {json}");
+                }
                 var response = JsonSerializer.Deserialize<GitHubTree>(json);
                 if (response?.Tree != null)
                 {
@@ -672,7 +681,7 @@ namespace HLMCUpdater
                 }
                 else
                 {
-                    throw new Exception("Failed to fetch repository tree.");
+                    throw new Exception("Failed to fetch repository tree - no items found. JSON: " + json);
                 }
             }
         }
@@ -836,7 +845,7 @@ namespace HLMCUpdater
                     {
                         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
                     }
-                    string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
+                    string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}";
                     var json = await client.GetStringAsync(apiUrl);
                     var release = JsonSerializer.Deserialize<GitHubRelease>(json);
 
@@ -984,7 +993,7 @@ namespace HLMCUpdater
             welcomePanel.Visible = true; // Show after update check
 
             Color statusColor = updateAvailable ? Color.Green : Color.Gray;
-            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "No update for Updater detected";
+            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "";
             updateStatusLabel.ForeColor = statusColor;
             updateStatusLabel.Visible = true;
             CenterControlX(updateStatusLabel, welcomePanel);
@@ -1021,51 +1030,139 @@ namespace HLMCUpdater
             control.Location = new Point(x, control.Location.Y);
         }
 
-        private Task<bool> CheckForUpdaterUpdatesOnStartup(string mcPath)
+        private async Task<bool> CheckForUpdaterUpdatesOnStartup(string mcPath)
         {
+            string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            string tempDir = Path.Combine(Path.GetTempPath(), "HLMC_Updater_Temp");
+            string tempExePath = Path.Combine(tempDir, "Holy Lois Updater.exe");
+            string resultsFile = Path.Combine(exeDir, "update_check_results.txt");
+
+            // Get versions
+            string currentVersion = EmbeddedVersion;
+            string remoteVersion = "could not get";
+            List<string> steps = new List<string>();
+            steps.Add($"Start: Checking for updates (Current Version: {currentVersion})");
+
             try
             {
-                string newExePath = Path.Combine(mcPath, "Holy Lois Updater.exe");
-                if (!File.Exists(newExePath)) return Task.FromResult(false);
+                // Create temp dir
+                steps.Add("Step 1: Creating temp directory");
+                Directory.CreateDirectory(tempDir);
+                steps.Add("Step 1: Temp directory created successfully");
 
-                string remoteVersion = FileVersionInfo.GetVersionInfo(newExePath).FileVersion ?? "";
-                if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != EmbeddedVersion)
+                // Download exe from GitHub releases
+                using (var client = new HttpClient())
                 {
-                    // Replace the modpack update button with updater update button
-                    welcomePanel.Controls.Remove(startButton);
-
-                    var updateButton = new Button
+                    steps.Add("Step 2: Setting up HTTP client");
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                    if (!string.IsNullOrEmpty(GitHubToken))
                     {
-                        Text = "Update Updater",
-                        Size = new Size(220, 50),
-                        Font = new Font("Arial", 13, FontStyle.Bold),
-                        Anchor = AnchorStyles.Top,
-                        BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
-                        ForeColor = Color.White,
-                        FlatStyle = FlatStyle.Flat,
-                        Location = new Point((welcomePanel.Width - 220) / 2, 320)
-                    };
-                    updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
-                    updateButton.FlatAppearance.BorderSize = 2;
-                    updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(newExePath);
-                    welcomePanel.Controls.Add(updateButton);
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return Task.FromResult(false);
+                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                    }
+                    string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}";
+                    steps.Add($"Step 3: Fetching GitHub release info from {apiUrl}");
+                    var json = await client.GetStringAsync(apiUrl);
+                    steps.Add($"Step 3: Received JSON response ({json.Length} characters)");
+                    var release = JsonSerializer.Deserialize<GitHubRelease>(json);
+                    steps.Add($"Step 3: Deserialized release - Assets count: {release?.Assets?.Count ?? 0}");
+
+                    if (release?.Assets?.Count > 0)
+                    {
+                        steps.Add("Step 4: Looking for exe asset");
+                        var exeAsset = release.Assets.FirstOrDefault(x => x.BrowserDownloadUrl?.EndsWith(".exe") == true);
+                        if (exeAsset?.BrowserDownloadUrl != null)
+                        {
+                            var downloadUrl = exeAsset.BrowserDownloadUrl;
+                            steps.Add($"Step 4: Found exe asset at {downloadUrl}");
+
+                            steps.Add("Step 5: Starting exe download");
+                            using (var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+                            {
+                                response.EnsureSuccessStatusCode();
+                                using (var stream = await response.Content.ReadAsStreamAsync())
+                                using (var fileStream = File.OpenWrite(tempExePath))
+                                {
+                                    await stream.CopyToAsync(fileStream);
+                                }
+                            }
+                            steps.Add($"Step 5: Download complete - File size: {new FileInfo(tempExePath).Length}");
+
+                            steps.Add("Step 6: Extracting version info");
+                            try
+                            {
+                                FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(tempExePath);
+                                remoteVersion = fvi.FileVersion ?? fvi.ProductVersion ?? "";
+                                if (string.IsNullOrWhiteSpace(remoteVersion))
+                                {
+                                    remoteVersion = $"could not get (FileVersion: '{fvi.FileVersion}', ProductVersion: '{fvi.ProductVersion}', FileSize: {new FileInfo(tempExePath).Length})";
+                                }
+                                steps.Add($"Step 6: Version extracted - {remoteVersion}");
+                            }
+                            catch (Exception ex)
+                            {
+                                remoteVersion = $"could not get - exception: {ex.Message}";
+                                steps.Add($"Step 6: Version extraction failed - {ex.Message}");
+                            }
+                        }
+                        else
+                        {
+                            steps.Add("Step 4: No exe asset found");
+                            remoteVersion = "could not get - no exe asset";
+                        }
+                    }
+                    else
+                    {
+                        steps.Add("Step 3: No assets found in release");
+                        remoteVersion = "could not get - no assets";
+                    }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Silently fail - just continue with normal operation
-                return Task.FromResult(false);
+                // Remote version remains "could not get"
+                steps.Add($"ERROR: Exception occurred - {ex.Message}");
+                remoteVersion = "could not get";
+            }
+
+            // Write results to txt file
+            string matchText = remoteVersion.Contains("could not get") ? "could not determine" : (string.Equals(currentVersion, remoteVersion, StringComparison.Ordinal) ? "True" : "False");
+            string results = $"Current Version: {currentVersion}\nRemote Version: {remoteVersion}\nMatch: {matchText}\n\nSTEP LOG:\n{string.Join("\n", steps)}";
+            File.WriteAllText(resultsFile, results);
+
+            if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != "could not get" && remoteVersion != currentVersion)
+            {
+                // Replace the modpack update button with updater update button
+                welcomePanel.Controls.Remove(startButton);
+
+                var updateButton = new Button
+                {
+                    Text = "Update Updater",
+                    Size = new Size(220, 50),
+                    Font = new Font("Arial", 13, FontStyle.Bold),
+                    Anchor = AnchorStyles.Top,
+                    BackColor = Color.FromArgb(255, 165, 0), // Orange color for urgency
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    Location = new Point((welcomePanel.Width - 220) / 2, 320)
+                };
+                updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
+                updateButton.FlatAppearance.BorderSize = 2;
+                updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
+                welcomePanel.Controls.Add(updateButton);
+                return true;
+            }
+            else
+            {
+                // Delete temp
+                try { Directory.Delete(tempDir, true); } catch { }
+                return false;
             }
         }
         // --- Helper Classes ---
                 class GitHubTree
                 {
                     public string? Sha { get; set; }
+                    [System.Text.Json.Serialization.JsonPropertyName("tree")]
                     public List<RepoItem>? Tree { get; set; }
                 }
         
