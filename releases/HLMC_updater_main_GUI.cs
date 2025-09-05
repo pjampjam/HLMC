@@ -480,6 +480,54 @@ namespace HLMCUpdater
             catch { } // Ignore all errors during cleanup
         }
 
+        private async Task AnimateStatusSlideUp()
+        {
+            const int slideDistance = 50; // Move up by 50 pixels
+            const int animationDuration = 800; // 800ms animation
+            const int steps = 20; // Number of animation steps
+            const int stepDelay = animationDuration / steps;
+
+            int originalY = updateStatusLabel.Location.Y;
+            int targetY = originalY - slideDistance;
+
+            // Animate upward movement
+            for (int i = 0; i < steps; i++)
+            {
+                double progress = (double)i / (steps - 1);
+                int currentY = (int)(originalY - (slideDistance * progress));
+
+                if (InvokeRequired)
+                {
+                    Invoke(new Action(() =>
+                    {
+                        updateStatusLabel.Location = new Point(updateStatusLabel.Location.X, currentY);
+                    }));
+                }
+                else
+                {
+                    updateStatusLabel.Location = new Point(updateStatusLabel.Location.X, currentY);
+                }
+
+                await Task.Delay(stepDelay);
+            }
+
+            // Ensure final position
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() =>
+                {
+                    updateStatusLabel.Location = new Point(updateStatusLabel.Location.X, targetY);
+                }));
+            }
+            else
+            {
+                updateStatusLabel.Location = new Point(updateStatusLabel.Location.X, targetY);
+            }
+
+            // Brief pause before hiding
+            await Task.Delay(200);
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -1038,12 +1086,23 @@ namespace HLMCUpdater
 
             // Update status based on results
             Color statusColor = updateAvailable ? Color.Green : Color.Gray;
-            updateStatusLabel.Text = updateAvailable ? "! Update for Updater Available" : "✓ No updates available";
+            updateStatusLabel.Text = updateAvailable ? "! Update for updater available !" : "✓ No updates for updater available";
             updateStatusLabel.ForeColor = statusColor;
             CenterControlX(updateStatusLabel, welcomePanel);
 
-            await Task.Delay(3000); // 3 second delay before hiding
-            updateStatusLabel.Visible = false;
+            await Task.Delay(2000); // 2 second delay before animation/hiding
+
+            if (!updateAvailable) // Only animate and hide for "No updates" message
+            {
+                await AnimateStatusSlideUp();
+                updateStatusLabel.Visible = false;
+            }
+            else
+            {
+                // Keep the update available message visible
+                await Task.Delay(1000); // Brief pause before staying visible
+                // Don't set Visible=false for update available messages
+            }
         }
 
         private void MainForm_Resize(object? sender, EventArgs e)
@@ -1199,10 +1258,10 @@ namespace HLMCUpdater
                 remoteVersion = "could not get";
             }
 
-            // Write results to txt file
-            string matchText = remoteVersion.Contains("could not get") ? "could not determine" : (string.Equals(currentVersion, remoteVersion, StringComparison.Ordinal) ? "True" : "False");
-            string results = $"Current Version: {currentVersion}\nRemote Version: {remoteVersion}\nMatch: {matchText}\n\nSTEP LOG:\n{string.Join("\n", steps)}";
-            File.WriteAllText(resultsFile, results);
+            // Write results to txt file (disabled by default - uncomment if needed for debugging)
+            // string matchText = remoteVersion.Contains("could not get") ? "could not determine" : (string.Equals(currentVersion, remoteVersion, StringComparison.Ordinal) ? "True" : "False");
+            // string results = $"Current Version: {currentVersion}\nRemote Version: {remoteVersion}\nMatch: {matchText}\n\nSTEP LOG:\n{string.Join("\n", steps)}";
+            // File.WriteAllText(resultsFile, results);
 
             if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != "could not get" && remoteVersion != currentVersion)
             {
