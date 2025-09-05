@@ -1,0 +1,15 @@
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\bin\Release\net9.0-windows\win-x64\Holy Lois Updater.exe
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\bin\Release\net9.0-windows\win-x64\Holy Lois Updater.deps.json
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\bin\Release\net9.0-windows\win-x64\Holy Lois Updater.runtimeconfig.json
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\bin\Release\net9.0-windows\win-x64\Holy Lois Updater.dll
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\bin\Release\net9.0-windows\win-x64\Holy Lois Updater.pdb
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\HLMCUpdater.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\HLMCUpdater.AssemblyInfoInputs.cache
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\HLMCUpdater.AssemblyInfo.cs
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\HLMCUpdater.csproj.CoreCompileInputs.cache
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\HLMCUpdater.sourcelink.json
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\Holy Lois Updater.dll
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\refint\Holy Lois Updater.dll
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\Holy Lois Updater.pdb
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\HLMCUpdater.genruntimeconfig.cache
+C:\Users\Main\Desktop\Work\.HLMCserver\releases\obj\Release\net9.0-windows\win-x64\ref\Holy Lois Updater.dll
