@@ -8,6 +8,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
@@ -56,15 +57,43 @@ namespace HLMCUpdater
                     return exeDir;
                 }
 
-                // Try to get from config file
-                string configPath = Path.Combine(exeDir, "config.json");
+                // Try to get from preferred config location (appdata)
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                string configPath = Path.Combine(appDataDir, "config.json");
                 if (File.Exists(configPath))
                 {
-                    var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
-                    if (config != null && config.TryGetValue("MinecraftPath", out var path) && !string.IsNullOrEmpty(path))
+                    try
                     {
-                        return path;
+                        var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
+                        if (config != null && config.TryGetValue("MinecraftPath", out var path) && !string.IsNullOrEmpty(path) && Directory.Exists(path))
+                        {
+                            // Validate the saved path still exists
+                            if (Directory.Exists(Path.Combine(path, "mods")) && Directory.Exists(Path.Combine(path, "config")))
+                            {
+                                return path;
+                            }
+                        }
                     }
+                    catch { } // Ignore deserialization errors
+                }
+
+                // Try legacy config in exe directory
+                string legacyConfigPath = Path.Combine(exeDir, "config.json");
+                if (File.Exists(legacyConfigPath))
+                {
+                    try
+                    {
+                        var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(legacyConfigPath));
+                        if (config != null && config.TryGetValue("MinecraftPath", out var path) && !string.IsNullOrEmpty(path) && Directory.Exists(path))
+                        {
+                            if (Directory.Exists(Path.Combine(path, "mods")) && Directory.Exists(Path.Combine(path, "config")))
+                            {
+                                return path;
+                            }
+                        }
+                    }
+                    catch { }
                 }
 
                 // Prompt user to select the Minecraft modpack folder
@@ -83,8 +112,19 @@ namespace HLMCUpdater
                             selectedPath = folderDialog.SelectedPath;
                             if (Directory.Exists(Path.Combine(selectedPath, "mods")) && Directory.Exists(Path.Combine(selectedPath, "config")))
                             {
-                                validFolder = true;
-                                break;
+                                // Additional validation: check if it's writable
+                                try
+                                {
+                                    string testFile = Path.Combine(selectedPath, "HLMC_test.tmp");
+                                    File.WriteAllText(testFile, "test");
+                                    File.Delete(testFile);
+                                    validFolder = true;
+                                    break;
+                                }
+                                catch
+                                {
+                                    MessageBox.Show("The selected folder is not writable. Please select a different folder.", "Invalid Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                }
                             }
                             else
                             {
@@ -106,14 +146,33 @@ namespace HLMCUpdater
             }
             set
             {
-                // Save to config file in exe directory
-                string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-                string configPath = Path.Combine(exeDir, "config.json");
+                // Save to preferred config location (appdata)
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string configDir = Path.Combine(appData, "HLMCUpdater");
+                if (!Directory.Exists(configDir))
+                {
+                    Directory.CreateDirectory(configDir);
+                }
+                string configPath = Path.Combine(configDir, "config.json");
                 var config = new Dictionary<string, string>
                 {
                     ["MinecraftPath"] = value
                 };
-                File.WriteAllText(configPath, JsonSerializer.Serialize(config));
+                try
+                {
+                    File.WriteAllText(configPath, JsonSerializer.Serialize(config));
+                }
+                catch
+                {
+                    // Try fallback to exe directory
+                    string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                    string fallbackConfig = Path.Combine(exeDir, "config.json");
+                    try
+                    {
+                        File.WriteAllText(fallbackConfig, JsonSerializer.Serialize(config));
+                    }
+                    catch { } // If fallback also fails, ignore
+                }
             }
         }
 
@@ -340,6 +399,20 @@ namespace HLMCUpdater
 
             this.FormClosing += (s, e) =>
             {
+                try
+                {
+                    // Final cleanup before shutdown
+                    CleanupOrphanedFiles();
+
+                    // Clean up temp directory if exists
+                    string tempDir = Path.Combine(Path.GetTempPath(), "HLMC_Updater_Temp");
+                    if (Directory.Exists(tempDir))
+                    {
+                        Directory.Delete(tempDir, true);
+                    }
+                }
+                catch { }
+
                 _cts?.Cancel();
                 Application.Exit();
             };
@@ -445,7 +518,7 @@ namespace HLMCUpdater
             catch { } // Ignore directory-level errors
         }
 
-        private void CleanupOrphanedBackupFiles()
+        private void CleanupOrphanedFiles()
         {
             try
             {
@@ -455,29 +528,180 @@ namespace HLMCUpdater
                 if (string.IsNullOrEmpty(currentExe)) return;
 
                 string currentExeName = Path.GetFileName(currentExe);
+
+                // Clean up old backup exe
                 string backupPattern = Path.GetFileNameWithoutExtension(currentExeName) + ".old.exe";
                 string backupPath = Path.Combine(exeDir, backupPattern);
-
-                // Check if backup file exists
                 if (File.Exists(backupPath))
                 {
                     try
                     {
-                        // Verify the backup file is older than current exe
                         FileInfo currentFi = new FileInfo(currentExe);
                         FileInfo backupFi = new FileInfo(backupPath);
-
-                        // Only clean up if backup is older (successful update scenario)
                         if (backupFi.LastWriteTime < currentFi.LastWriteTime)
                         {
                             File.Delete(backupPath);
                         }
-                        // If backup is newer, it might be from a failed update - keep it for manual inspection
                     }
-                    catch { } // Ignore cleanup errors
+                    catch { }
                 }
+
+                // Clean up partial new exe files
+                string newPattern = Path.GetFileNameWithoutExtension(currentExeName) + ".new.exe";
+                string newPath = Path.Combine(exeDir, newPattern);
+                if (File.Exists(newPath))
+                {
+                    try
+                    {
+                        FileInfo fi = new FileInfo(newPath);
+                        // Delete if older than 1 hour (left from failed update)
+                        if ((DateTime.Now - fi.LastWriteTime).TotalHours > 1)
+                        {
+                            File.Delete(newPath);
+                        }
+                    }
+                    catch { }
+                }
+
+                // Clean up temp files in exe directory
+                try
+                {
+                    foreach (var file in Directory.GetFiles(exeDir, "*.temp"))
+                    {
+                        try
+                        {
+                            FileInfo fi = new FileInfo(file);
+                            if ((DateTime.Now - fi.LastWriteTime).TotalHours > 1)
+                            {
+                                File.Delete(file);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+
+                // Clean up corrupted or incomplete downloads
+                try
+                {
+                    foreach (var file in Directory.GetFiles(exeDir, "*.tmp"))
+                    {
+                        try
+                        {
+                            FileInfo fi = new FileInfo(file);
+                            if (fi.Length == 0 || (DateTime.Now - fi.LastWriteTime).TotalHours > 1)
+                            {
+                                File.Delete(file);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
             }
             catch { } // Ignore all errors during cleanup
+        }
+
+        private void MigrateOldConfigFiles()
+        {
+            try
+            {
+                string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string configDir = Path.Combine(appData, "HLMCUpdater");
+
+                // Migrate old config.json from exe directory
+                string oldConfig = Path.Combine(exeDir, "config.json");
+                string newConfig = Path.Combine(configDir, "config.json");
+                if (File.Exists(oldConfig) && !File.Exists(newConfig))
+                {
+                    if (!Directory.Exists(configDir))
+                    {
+                        Directory.CreateDirectory(configDir);
+                    }
+                    File.Move(oldConfig, newConfig);
+                }
+
+                // Migrate old repoTreeCache.json from exe directory
+                string oldCache = Path.Combine(exeDir, "repoTreeCache.json");
+                string newCache = Path.Combine(configDir, "repoTreeCache.json");
+                if (File.Exists(oldCache) && !File.Exists(newCache))
+                {
+                    File.Move(oldCache, newCache);
+                }
+            }
+            catch { } // Ignore migration errors
+        }
+
+        private bool IsDotNet90DesktopRuntimeInstalled()
+        {
+            try
+            {
+                var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "cmd",
+                        Arguments = "/c dotnet --list-runtimes",
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                process.Start();
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit();
+                return output.Contains("Microsoft.WindowsDesktop.App 9.0");
+            }
+            catch
+            {
+                return true; // If dotnet is not found, assume it's available since the app is running
+            }
+        }
+
+        private async Task EnsureDotNetRuntime()
+        {
+            if (!IsDotNet90DesktopRuntimeInstalled())
+            {
+                DialogResult result = MessageBox.Show("The .NET 9.0 Desktop Runtime is required but not installed. Would you like to download and install it now?", "Missing .NET Runtime", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (result == DialogResult.Yes)
+                {
+                    string downloadUrl = "https://download.visualstudio.microsoft.com/download/pr/106f8636-9352-4d71-99f3-0f3b4fe7a2d6/64b40fa1d5fe2850c0cf5e9aaa1b5e9/windowsdesktop-runtime-9.0.8-win-x64.exe"; // v9.0.8
+                    string installerPath = Path.Combine(Path.GetTempPath(), "net90-desktop-runtime.exe");
+                    try
+                    {
+                        UpdateStatus("Downloading .NET Runtime...");
+                        using (var client2 = new HttpClient())
+                        {
+                            var response = await client2.GetAsync(downloadUrl);
+                            response.EnsureSuccessStatusCode();
+                            using (var stream = await response.Content.ReadAsStreamAsync())
+                            using (var fileStream = File.OpenWrite(installerPath))
+                            {
+                                await stream.CopyToAsync(fileStream);
+                            }
+                        }
+                        UpdateStatus("Installing .NET Runtime... (This may take a few minutes)");
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = installerPath,
+                            Arguments = "/quiet /norestart",
+                            UseShellExecute = true
+                        }).WaitForExit();
+                        MessageBox.Show("Installation completed. Please restart the application.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Application.Exit();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to install .NET Runtime: {ex.Message}. Please download manually from https://dotnet.microsoft.com/download/dotnet/9.0", "Installation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("The application cannot continue without the required runtime. Exiting.", "Runtime Required", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Application.Exit();
+                }
+            }
         }
 
         private async Task AnimateStatusSlideUp()
@@ -722,8 +946,13 @@ namespace HLMCUpdater
 
         private async Task<List<RepoItem>> FetchRepoTree()
         {
-            string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-            string cacheFile = Path.Combine(exeDir, "repoTreeCache.json");
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string cacheDir = Path.Combine(appData, "HLMCUpdater");
+            if (!Directory.Exists(cacheDir))
+            {
+                Directory.CreateDirectory(cacheDir);
+            }
+            string cacheFile = Path.Combine(cacheDir, "repoTreeCache.json");
             if (File.Exists(cacheFile))
             {
                 try
@@ -1070,6 +1299,8 @@ namespace HLMCUpdater
         {
             _programVersion = "v" + EmbeddedVersion;
 
+            await EnsureDotNetRuntime();
+
             // Show welcome panel immediately with checking status
             welcomePanel.Visible = true;
             updateStatusLabel.Text = "🔄 Checking for updater updates...";
@@ -1077,8 +1308,11 @@ namespace HLMCUpdater
             updateStatusLabel.Visible = true;
             CenterControlX(updateStatusLabel, welcomePanel);
 
-            // Cleanup any orphaned backup files from previous updates
-            CleanupOrphanedBackupFiles();
+            // Cleanup any orphaned files from previous operations
+            CleanupOrphanedFiles();
+
+            // Migrated old config and cache files to appdata (won't overwrite if already migrated)
+            MigrateOldConfigFiles();
 
             MainForm_Resize(sender, e);
             string mcPath = GetMinecraftPathWithoutPrompt();
