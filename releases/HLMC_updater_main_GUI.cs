@@ -375,6 +375,7 @@ namespace HLMCUpdater
         Label updateStatusLabel;
         Button startButton, closeButton, cancelButton;
         Button? setApiKeyButton = null;
+        Button? updaterUpdateButton = null;
         ProgressBar downloadProgressBar;
         TextBox summaryTextBox;
         CancellationTokenSource _cts;
@@ -3025,6 +3026,13 @@ namespace HLMCUpdater
             updateStatusLabel.Visible = true;
             CenterControlX(updateStatusLabel, welcomePanel);
 
+            // Disable buttons during update check to prevent multiple clicks
+            startButton.Enabled = false;
+            if (updaterUpdateButton != null && welcomePanel.Controls.Contains(updaterUpdateButton))
+            {
+                updaterUpdateButton.Enabled = false;
+            }
+
             // Cleanup any orphaned files from previous operations
             CleanupOrphanedFiles();
 
@@ -3045,6 +3053,13 @@ namespace HLMCUpdater
             MainForm_Resize(sender, e);
             string mcPath = GetMinecraftPathWithoutPrompt();
             bool updateAvailable = await CheckForUpdaterUpdatesOnStartup(mcPath);
+
+            // Re-enable buttons after update check completes
+            startButton.Enabled = true;
+            if (updaterUpdateButton != null)
+            {
+                updaterUpdateButton.Enabled = true;
+            }
 
             // Update status based on results
             Color statusColor = updateAvailable ? Color.Green : Color.Gray;
@@ -3125,7 +3140,8 @@ namespace HLMCUpdater
                     string apiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{GitHubBranch}?recursive=true";
                     steps.Add($"Step 3: Fetching GitHub tree from {apiUrl}");
 
-                    // Update UI status for user feedback
+                    // Update UI status for user feedback (throttled to prevent lag)
+                    await Task.Delay(100); // 100ms delay to prevent GUI lag
                     if (InvokeRequired)
                     {
                         Invoke(new Action(() =>
@@ -3158,7 +3174,8 @@ namespace HLMCUpdater
 
                             steps.Add("Step 5: Starting exe download");
 
-                            // Update UI status for download
+                            // Update UI status for download (throttled to prevent lag)
+                            await Task.Delay(100); // 100ms delay to prevent GUI lag
                             if (InvokeRequired)
                             {
                                 Invoke(new Action(() =>
@@ -3242,7 +3259,7 @@ namespace HLMCUpdater
                 // Replace the modpack update button with updater update button
                 welcomePanel.Controls.Remove(startButton);
 
-                var updateButton = new Button
+                updaterUpdateButton = new Button
                 {
                     Text = "Update Updater",
                     Size = new Size(220, 50),
@@ -3253,10 +3270,10 @@ namespace HLMCUpdater
                     FlatStyle = FlatStyle.Flat,
                     Location = new Point((welcomePanel.Width - 220) / 2, creditLabel.Bottom + 50) // Same position as original start button
                 };
-                updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
-                updateButton.FlatAppearance.BorderSize = 2;
-                updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
-                welcomePanel.Controls.Add(updateButton);
+                updaterUpdateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 140, 0);
+                updaterUpdateButton.FlatAppearance.BorderSize = 2;
+                updaterUpdateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
+                welcomePanel.Controls.Add(updaterUpdateButton);
                 return true;
             }
             else if (remoteVersion == currentVersion && File.Exists(Path.Combine(exeDir, "FORCE_UPDATE_TEST")))
@@ -3264,7 +3281,7 @@ namespace HLMCUpdater
                 // Debug mode: Force show update button for testing even when versions match
                 welcomePanel.Controls.Remove(startButton);
 
-                var updateButton = new Button
+                updaterUpdateButton = new Button
                 {
                     Text = "[TEST] Update Updater",
                     Size = new Size(220, 50),
@@ -3275,10 +3292,10 @@ namespace HLMCUpdater
                     FlatStyle = FlatStyle.Flat,
                     Location = new Point((welcomePanel.Width - 220) / 2, creditLabel.Bottom + 50)
                 };
-                updateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 0, 200);
-                updateButton.FlatAppearance.BorderSize = 2;
-                updateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
-                welcomePanel.Controls.Add(updateButton);
+                updaterUpdateButton.FlatAppearance.BorderColor = Color.FromArgb(200, 0, 200);
+                updaterUpdateButton.FlatAppearance.BorderSize = 2;
+                updaterUpdateButton.Click += async (s, e) => await DownloadUpdaterUpdate(tempExePath);
+                welcomePanel.Controls.Add(updaterUpdateButton);
                 return true;
             }
             else
