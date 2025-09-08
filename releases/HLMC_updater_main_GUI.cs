@@ -789,8 +789,8 @@ namespace HLMCUpdater
                 {
                     client.Timeout = TimeSpan.FromMinutes(30); // Allow longer downloads for large files
 
-                    // Test repository access with a simple API call
-                    UpdateStatus("Checking repository accessibility...");
+                    // Test repository access and verify it exists
+                    UpdateStatus("Verifying repository accessibility...");
                     try
                     {
                         string testApiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}";
@@ -804,16 +804,32 @@ namespace HLMCUpdater
                             var testResponse = await testClient.GetAsync(testApiUrl);
                             if (!testResponse.IsSuccessStatusCode)
                             {
-                                throw new Exception($"Repository not accessible: {testResponse.StatusCode} - {testResponse.ReasonPhrase}");
+                                if (testResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                                {
+                                    throw new Exception("Repository not found. The repository may have been moved, renamed, or deleted.");
+                                }
+                                else
+                                {
+                                    throw new Exception($"Repository not accessible: {testResponse.StatusCode} - {testResponse.ReasonPhrase}");
+                                }
                             }
                             var json = await testResponse.Content.ReadAsStringAsync();
                             var repoData = JsonSerializer.Deserialize<GitHubRepoInfo>(json);
                             if (repoData?.Private == true && string.IsNullOrEmpty(GitHubToken))
                             {
-                                throw new Exception("Repository is private but no authentication token is configured.");
+                                throw new Exception("Repository is private but no authentication token is configured. Please set a GitHub token.");
+                            }
+
+                            // Verify the default branch exists
+                            string defaultBranch = repoData?.DefaultBranch ?? "main";
+                            string branchTestUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/git/trees/{defaultBranch}";
+                            var branchResponse = await testClient.GetAsync(branchTestUrl);
+                            if (!branchResponse.IsSuccessStatusCode)
+                            {
+                                throw new Exception($"Default branch '{defaultBranch}' not found or not accessible.");
                             }
                         }
-                        UpdateStatus("Repository connection confirmed.");
+                        UpdateStatus("Repository and branch access confirmed.");
                     }
                     catch (Exception ex)
                     {
@@ -821,9 +837,10 @@ namespace HLMCUpdater
                         results.Error = "Could not access GitHub repository. This may be due to:\n" +
                                        "• No internet connection\n" +
                                        "• Repository is private and no authentication token is set\n" +
-                                       "• Repository doesn't exist or has been moved\n" +
+                                       "• Repository doesn't exist, has been moved, or renamed\n" +
+                                       "• Default branch is incorrect\n" +
                                        $"• Repository URL: https://github.com/{GitHubOwner}/{GitHubRepo}\n\n" +
-                                       $"Details: {ex.Message}";
+                                       $"Technical details: {ex.Message}";
                         throw;
                     }
 
@@ -1080,7 +1097,7 @@ namespace HLMCUpdater
                 string itemType = folderName.ToUpper().TrimEnd('S');
                 results.Added.Add($"{itemType}: {itemName}");
                 string itemPath = $"{folderName}/{itemName}";
-                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{itemPath}";
+                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(itemPath)}";
                 string destination = Path.Combine(localDirPath, itemName!);
                 currentDownloads.Add(destination);
 
@@ -1649,7 +1666,8 @@ namespace HLMCUpdater
 
         class GitHubRepoInfo
         {
-            public string? Visibility { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("default_branch")]
+            public string? DefaultBranch { get; set; }
             public bool Private { get; set; }
         }
     }
