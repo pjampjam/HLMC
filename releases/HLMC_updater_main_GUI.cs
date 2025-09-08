@@ -145,17 +145,43 @@ namespace HLMCUpdater
             }
         }
 
-        private bool PromptForGitHubToken()
-{
-    var result = MessageBox.Show(
-        "GitHub API requests rate limit exceeded.\n\n" +
-        "To ensure smooth updates, please provide a GitHub Personal Access Token.\n\n" +
-        "This token will be stored securely in your app settings.\n\n" +
-        "Would you like to enter a token now?",
-        "Rate Limit Exceeded",
-        MessageBoxButtons.YesNo,
-        MessageBoxIcon.Warning
-    );
+        private async Task<bool> PromptForGitHubTokenAsync()
+        {
+            // First get current rate limit status to show better messaging
+            RateLimitInfo rateInfo = await CheckGitHubRateLimit();
+
+            string message = "GitHub API requests rate limit exceeded.\n\n";
+            string title = "Rate Limit Exceeded";
+
+            if (rateInfo.ResetTime.HasValue && rateInfo.Remaining.HasValue && rateInfo.Remaining.Value == 0)
+            {
+                title = "Rate Limit Exceeded - Action Required!";
+                var waitTime = rateInfo.ResetTime.Value - DateTimeOffset.Now;
+                if (waitTime.TotalSeconds > 0)
+                {
+                    message += $"⏱️  ALL API REQUESTS EXHAUSTED!\n\n" +
+                               $"- Rate limit will reset at: {rateInfo.ResetTime.Value:G}\n" +
+                               $"- Current time: {DateTimeOffset.Now:G}\n" +
+                               $"- Wait approximately: {Math.Ceiling(waitTime.TotalMinutes):F0} minutes\n\n";
+                }
+            }
+            else if (rateInfo.Remaining.HasValue && rateInfo.Limit.HasValue)
+            {
+                message += $"- Current status: {rateInfo.Remaining.Value}/{rateInfo.Limit.Value} requests remaining\n\n";
+            }
+
+            message += "To ensure smooth updates, please provide a GitHub Personal Access Token.\n" +
+                      "This token increases your rate limit from 60 to 5000 requests/hour!\n\n" +
+                      "Token will be stored securely in your app settings.\n\n" +
+                      "Would you like to enter a token now?\n\n" +
+                      "📋 You can create a token here:\nhttps://github.com/settings/tokens";
+
+            var result = MessageBox.Show(
+                message,
+                title,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
 
             if (result == DialogResult.Yes)
             {
@@ -166,7 +192,7 @@ namespace HLMCUpdater
                     using (var inputForm = new Form())
                     {
                         inputForm.Text = "Enter GitHub Personal Access Token";
-                        inputForm.Size = new Size(400, 200);
+                        inputForm.Size = new Size(480, 220);
                         inputForm.StartPosition = FormStartPosition.CenterParent;
                         inputForm.BackColor = Color.FromArgb(30, 30, 30);
                         inputForm.ForeColor = Color.White;
@@ -176,32 +202,69 @@ namespace HLMCUpdater
 
                         var label = new Label
                         {
-                            Text = "Paste your GitHub Personal Access Token:\n\n" +
-                                   "Create token at: https://github.com/settings/tokens\n\n" +
-                                   "• Create an account or Log-in and then 'Generate new token'",
+                            Text = "Paste your GitHub Personal Access Token below:\n\n" +
+                                   "🔐 Token will be saved securely in app settings\n" +
+                                   "⚡ Increases rate limit from 60 to 5000 requests/hour\n\n" +
+                                   "📋 Create new token at:",
                             AutoSize = true,
-                            Location = new Point(10, 10),
+                            Location = new Point(20, 10),
                             ForeColor = Color.White
                         };
                         inputForm.Controls.Add(label);
 
+                        var linkLabel = new LinkLabel
+                        {
+                            Text = "https://github.com/settings/tokens",
+                            Location = new Point(20, 85),
+                            Size = new Size(440, 20),
+                            LinkColor = Color.LightBlue,
+                            VisitedLinkColor = Color.LightBlue,
+                            Font = new Font("Arial", 10, FontStyle.Underline),
+                            ForeColor = Color.LightBlue
+                        };
+                        linkLabel.LinkClicked += (s, e) => Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "https://github.com/settings/tokens",
+                            UseShellExecute = true
+                        });
+                        inputForm.Controls.Add(linkLabel);
+
+                        var tokenLabel = new Label
+                        {
+                            Text = "Personal Access Token:",
+                            Location = new Point(20, 105),
+                            ForeColor = Color.White,
+                            AutoSize = true
+                        };
+                        inputForm.Controls.Add(tokenLabel);
+
                         var textBox = new TextBox
                         {
                             UseSystemPasswordChar = true,
-                            Location = new Point(10, 90),
-                            Size = new Size(360, 20),
+                            Location = new Point(20, 125),
+                            Size = new Size(440, 20),
                             BackColor = Color.FromArgb(50, 50, 50),
                             ForeColor = Color.White,
                             BorderStyle = BorderStyle.FixedSingle
                         };
                         inputForm.Controls.Add(textBox);
 
+                        var instructionLabel = new Label
+                        {
+                            Text = "• Give 'repo' scope for private repos\n• Copy the token exactly as shown",
+                            Location = new Point(20, 150),
+                            AutoSize = true,
+                            ForeColor = Color.FromArgb(180, 180, 180),
+                            Font = new Font("Arial", 8)
+                        };
+                        inputForm.Controls.Add(instructionLabel);
+
                         var okButton = new Button
                         {
-                            Text = "Save Token",
+                            Text = "Save & Continue",
                             DialogResult = DialogResult.OK,
-                            Location = new Point(180, 120),
-                            Size = new Size(100, 30)
+                            Location = new Point(240, 170),
+                            Size = new Size(120, 30)
                         };
                         inputForm.Controls.Add(okButton);
                         inputForm.AcceptButton = okButton;
@@ -210,8 +273,8 @@ namespace HLMCUpdater
                         {
                             Text = "Skip",
                             DialogResult = DialogResult.Cancel,
-                            Location = new Point(290, 120),
-                            Size = new Size(80, 30)
+                            Location = new Point(360, 170),
+                            Size = new Size(100, 30)
                         };
                         inputForm.Controls.Add(cancelButton);
                         inputForm.CancelButton = cancelButton;
@@ -1557,7 +1620,7 @@ namespace HLMCUpdater
 
                             if (addTokenResult == DialogResult.Yes)
                             {
-                                if (PromptForGitHubToken())
+                                if (await PromptForGitHubTokenAsync())
                                 {
                                     UpdateStatus("Token added - continuing update...");
                                     // Don't return, continue with the update
@@ -1592,7 +1655,7 @@ namespace HLMCUpdater
 
                     if (fallbackResult == DialogResult.Yes)
                     {
-                        if (PromptForGitHubToken())
+                        if (await PromptForGitHubTokenAsync())
                         {
                             UpdateStatus("Token added - continuing update...");
                             // Don't return, continue with the update
@@ -1636,6 +1699,39 @@ namespace HLMCUpdater
                                 else if (testResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                                 {
                                     throw new Exception($"Authentication failed. Your GitHub token may be invalid or expired.\n\nPlease create a new token at: https://github.com/settings/tokens");
+                                }
+                                else if (testResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                                {
+                                    // Check rate limit status for Forbidden errors
+                                    RateLimitInfo rateInfo = await CheckGitHubRateLimit();
+                                    if (rateInfo.Remaining.HasValue && rateInfo.Remaining.Value == 0)
+                                    {
+                                        var waitTime = DateTimeOffset.Now;
+                                        if (rateInfo.ResetTime.HasValue)
+                                        {
+                                            waitTime = rateInfo.ResetTime.Value;
+                                        }
+                                        else
+                                        {
+                                            waitTime = waitTime.AddHours(1); // Default to 1 hour
+                                        }
+
+                                        var timeToWait = waitTime - DateTimeOffset.Now;
+                                        throw new Exception($"Repository not accessible: Forbidden - rate limit exceeded\n\n" +
+                                                          $"⏱️ GitHub API rate limit exhausted!\n" +
+                                                          $"{(rateInfo.ResetTime.HasValue ? $"• Rate limit will reset at: {rateInfo.ResetTime.Value:G}\n" : "")}" +
+                                                          $"{(timeToWait.TotalSeconds > 0 ? $"• Estimated wait time: {Math.Ceiling(timeToWait.TotalMinutes):F0} minutes\n" : "")}\n" +
+                                                          $"SOLUTION: Add a GitHub Personal Access Token to bypass rate limits\n" +
+                                                          $"📋 Create at: https://github.com/settings/tokens\n\n" +
+                                                          $"Tokens increase your limit from 60 to 5000 requests/hour!\n\n" +
+                                                          $"If you're using a GitHub token, it may have expired or lack required permissions.");
+                                    }
+                                    else
+                                    {
+                                        throw new Exception($"Repository not accessible: {testResponse.StatusCode} - {testResponse.ReasonPhrase}\n\n" +
+                                                          $"Forbidden errors often indicate rate limiting or authentication issues.\n" +
+                                                          $"Consider adding a GitHub Personal Access Token: https://github.com/settings/tokens");
+                                    }
                                 }
                                 else
                                 {
@@ -2032,6 +2128,9 @@ namespace HLMCUpdater
                 }
 
                 string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{folderName}/{encodedFileName}";
+
+                // Also try non-encoded URL as fallback if encoded fails
+                string nonEncodedUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{folderName}/{itemName}";
                 string destination = Path.Combine(localDirPath, itemName!);
                 currentDownloads.Add(destination);
 
@@ -2051,7 +2150,7 @@ namespace HLMCUpdater
 
                 try
                 {
-                    bool downloadSuccess = await DownloadFileWithRobustHandling(downloadUrl, destination, _cts.Token, client, itemName!);
+                    bool downloadSuccess = await DownloadFileWithRobustHandling(downloadUrl, nonEncodedUrl, destination, _cts.Token, client, itemName!);
                     if (downloadSuccess)
                     {
                         if (DebugLoggingEnabled)
@@ -2149,7 +2248,7 @@ namespace HLMCUpdater
                                 if (addTokenResult == DialogResult.Yes)
                                 {
                                     debugLog.Add($"Step 7/8: User chose to add token");
-                                    if (PromptForGitHubToken())
+                                    if (await PromptForGitHubTokenAsync())
                                     {
                                         debugLog.Add($"Step 8/8: Token added successfully - continuing");
                                         UpdateStatus("Token added - continuing update...");
@@ -2192,7 +2291,7 @@ namespace HLMCUpdater
                         if (fallbackResult == DialogResult.Yes)
                         {
                             debugLog.Add($"Step 7/8: User chose to add token (fallback)");
-                            if (PromptForGitHubToken())
+                            if (await PromptForGitHubTokenAsync())
                             {
                                 debugLog.Add($"Step 8/8: Token added successfully (fallback) - continuing");
                                 UpdateStatus("Token added - continuing update...");
@@ -2320,7 +2419,7 @@ namespace HLMCUpdater
             }
         }
 
-        private async Task<bool> DownloadFileWithRobustHandling(string url, string destination, CancellationToken cancellationToken, HttpClient client, string itemName)
+        private async Task<bool> DownloadFileWithRobustHandling(string url, string fallbackUrl, string destination, CancellationToken cancellationToken, HttpClient client, string itemName)
         {
             const int maxRetries = 3;
             const int baseDelayMillis = 2000; // 2 seconds initial delay
@@ -2329,7 +2428,7 @@ namespace HLMCUpdater
             {
                 try
                 {
-                    // First, check if file is accessible with HEAD request
+                    // First, check if file is accessible with HEAD request (but don't rely on it completely)
                     if (retryCount == 0)
                     {
                         try
@@ -2341,7 +2440,7 @@ namespace HLMCUpdater
                                 {
                                     if (!headResponse.IsSuccessStatusCode)
                                     {
-                                        UpdateStatus($"❌ File accessibility check failed (HTTP {headResponse.StatusCode}): {itemName}");
+                                        UpdateStatus($"⚠️ HEAD check failed (HTTP {headResponse.StatusCode}) for {itemName} - proceeding with GET anyway");
 
                                         if (DebugLoggingEnabled)
                                         {
@@ -2352,19 +2451,16 @@ namespace HLMCUpdater
                                             using (var logWriter = File.AppendText(Path.Combine(appDataDir, $"{deviceId}_sync_debug_mods.txt")))
                                             {
                                                 logWriter.WriteLine($"--- HEAD REQUEST CHECK FAILED ---");
-                                                logWriter.WriteLine($"URL: {url}");
+                                                logWriter.WriteLine($"Primary URL: {url}");
+                                                logWriter.WriteLine($"Fallback URL: {fallbackUrl}");
                                                 logWriter.WriteLine($"Status Code: {headResponse.StatusCode}");
                                                 logWriter.WriteLine($"Reason: {headResponse.ReasonPhrase}");
-                                                logWriter.WriteLine($"Retry attempt: {retryCount + 1}/{maxRetries}");
+                                                logWriter.WriteLine($"Will proceed with GET request anyway...");
                                                 logWriter.WriteLine($"Time: {DateTime.Now:G}");
                                             }
                                         }
 
-                                        if (headResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
-                                        {
-                                            // If HEAD request fails with 404, try GET immediately instead of retrying
-                                            break;
-                                        }
+                                        // Don't break - just log and proceed with GET
                                     }
                                     else
                                     {
@@ -2393,7 +2489,16 @@ namespace HLMCUpdater
                     }
 
                     // Attempt download with robust progress handling
-                    await DownloadFileWithProgress(url, destination, cancellationToken, client, itemName, retryCount);
+                    try
+                    {
+                        await DownloadFileWithProgress(url, destination, cancellationToken, client, itemName, retryCount);
+                    }
+                    catch (HttpRequestException ex) when (ex.Message.Contains("404") && !string.IsNullOrEmpty(fallbackUrl) && fallbackUrl != url)
+                    {
+                        // Try fallback URL if primary fails with 404
+                        UpdateStatus($"Retrying {itemName} with alternate URL...");
+                        await DownloadFileWithProgress(fallbackUrl, destination, cancellationToken, client, itemName, retryCount);
+                    }
 
                     // If we get here, download was successful
                     return true;
