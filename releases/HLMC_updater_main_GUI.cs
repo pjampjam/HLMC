@@ -615,6 +615,60 @@ namespace HLMCUpdater
             catch { } // Ignore all errors during cleanup
         }
 
+        private async Task<RateLimitInfo> CheckGitHubRateLimit()
+        {
+            var info = new RateLimitInfo();
+
+            try
+            {
+                using (var testClient = new HttpClient())
+                {
+                    testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater-RateLimitCheck");
+
+                    // Make a simple test request to get rate limit headers
+                    var response = await testClient.GetAsync("https://api.github.com/rate_limit");
+                    if (response != null)
+                    {
+                        var limits = response.Content.ReadAsStringAsync().Result;
+
+                        try
+                        {
+                            var rateLimitData = JsonSerializer.Deserialize<JsonElement>(limits);
+                            var resources = rateLimitData.GetProperty("resources");
+
+                            if (resources.TryGetProperty("core", out var core))
+                            {
+                                if (core.TryGetProperty("limit", out var limit))
+                                    info.Limit = limit.GetInt32();
+
+                                if (core.TryGetProperty("remaining", out var remaining))
+                                    info.Remaining = remaining.GetInt32();
+
+                                if (core.TryGetProperty("reset", out var reset))
+                                {
+                                    // Unix timestamp
+                                    info.ResetTime = DateTimeOffset.FromUnixTimeSeconds(reset.GetInt64());
+                                }
+                            }
+                        }
+                        catch (Exception parseEx)
+                        {
+                            LogException(new Exception($"Failed to parse rate limit response: {parseEx.Message}"));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(new Exception($"Rate limit check failed: {ex.Message}"));
+                // If we can't check, assume no rate limit
+                info.Remaining = 1000;
+                info.Limit = 5000;
+            }
+
+            return info;
+        }
+
         private void MigrateOldConfigFiles()
         {
             try
@@ -1124,29 +1178,71 @@ namespace HLMCUpdater
                 }
                 catch (HttpRequestException ex) when (ex.Message.Contains("404"))
                 {
-                    // Advanced diagnostic checks
+                    // Check for rate limiting first
+                    var rateLimitInfo = await CheckGitHubRateLimit();
+                    if (rateLimitInfo.IsLimited)
+                    {
+                        if (rateLimitInfo.ResetTime.HasValue)
+                        {
+                            var resetTime = rateLimitInfo.ResetTime.Value;
+                            var waitTime = resetTime - DateTimeOffset.Now;
+
+                            if (waitTime.TotalSeconds > 0)
+                            {
+                                if (waitTime.TotalMinutes < 1)
+                                {
+                                    UpdateStatus($"Rate limited - waiting {waitTime.TotalSeconds:F0} seconds...");
+                                }
+                                else
+                                {
+                                    UpdateStatus($"Rate limited - waiting {waitTime.TotalMinutes:F0} minutes...");
+                                }
+
+                                await Task.Delay(waitTime);
+
+                                // Retry the download
+                                try
+                                {
+                                    await DownloadFileWithProgress(downloadUrl, destination, _cts.Token, client);
+                                    UpdateStatus($"Successfully downloaded after waiting: {itemName}");
+                                    return; // Success, continue with next file
+                                }
+                                catch
+                                {
+                                    // Still failed after waiting, continue with diagnostic checks
+                                    UpdateStatus("Still failing after rate limit wait, checking other issues...");
+                                }
+                            }
+                        }
+                    }
+
+                    // Advanced diagnostic checks if not rate limited
                     try
                     {
                         List<string> branchesToTry = ["main", "master"];
 
                         foreach (string branch in branchesToTry)
                         {
-                            string apiTestUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/contents/{folderName}/{itemName}?ref={branch}";
-                            using (var testClient = new HttpClient())
+                            if (itemName != null)
                             {
-                                testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
-                                if (!string.IsNullOrEmpty(GitHubToken))
+                                string apiTestUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/contents/{folderName}/{Uri.EscapeDataString(itemName)}?ref={branch}";
+                                using (var testClient = new HttpClient())
                                 {
-                                    testClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
-                                }
+                                    // Use different User-Agent to avoid rate limit sharing
+                                    testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater-Diagnostics");
+                                    if (!string.IsNullOrEmpty(GitHubToken))
+                                    {
+                                        testClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                                    }
 
-                                var testResponse = await testClient.GetAsync(apiTestUrl);
-                                if (testResponse.IsSuccessStatusCode)
-                                {
-                                    // File exists in API, try different approach
-                                    string workingUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{branch}/{folderName}/{encodedFileName}";
-                                    UpdateStatus($"Found file on '{branch}', trying alternate URL...");
-                                    LogException(new Exception($"SWITCHING BRANCH: Original 404 → Found on branch '{branch}'"));
+                                    var testResponse = await testClient.GetAsync(apiTestUrl);
+                                    if (testResponse.IsSuccessStatusCode)
+                                    {
+                                        // File exists in API, try different approach
+                                        string workingUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{branch}/{folderName}/{encodedFileName}";
+                                        UpdateStatus($"Found file on branch '{branch}', trying alternative approach...");
+                                        LogException(new Exception($"BRANCH DISCOVERY: File exists on '{branch}' but main branch failed"));
+                                    }
                                 }
                             }
                         }
@@ -1156,15 +1252,22 @@ namespace HLMCUpdater
                         LogException(new Exception($"Diagnostic check failed: {diagEx.Message}"));
                     }
 
-                    // Log 404 errors with more details
+                    // Log 404 errors with rate limit info
+                    string rateLimitAdvice = "If you're getting frequent 404s, try adding a GitHub authentication token.";
+                    if (rateLimitInfo.Limit.HasValue && rateLimitInfo.Remaining.HasValue)
+                    {
+                        rateLimitAdvice += $"\nGitHub API Status: {rateLimitInfo.Remaining}/{rateLimitInfo.Limit} requests remaining.";
+                    }
+
                     string errorMsg = $"404 Not Found for: {downloadUrl}\nGitHub Repo: {GitHubOwner}/{GitHubRepo}\nBranch: {GitHubBranch}\nFile: {itemName}";
-                    LogException(new Exception(errorMsg, ex));
+                    LogException(new Exception(errorMsg + $"\nRate Limit Info: {rateLimitInfo}", ex));
                     results.Status = "FAILED";
-                    results.Error = $"File download failed (404): {itemName}\n\nThis may be due to:\n" +
-                                    "• Repository is private and requires authentication token\n" +
-                                    "• The default branch is not 'main' but 'master' or other\n" +
-                                    "• Files have been moved or removed from repository\n" +
-                                    "• GitHub API limitations or rate limiting\n\n" +
+                    results.Error = $"File download failed (404): {itemName}\n\nPossible causes:\n" +
+                                    "• GitHub rate limiting (unauthenticated requests)\n" +
+                                    "• Repository is private (requires authentication)\n" +
+                                    "• Wrong branch name (use 'main' or set correct branch)\n" +
+                                    "• File has been moved or removed from repository\n\n" +
+                                    $"{rateLimitAdvice}\n\n" +
                                     $"Failed URL: {downloadUrl}\n" +
                                     $"Repository: https://github.com/{GitHubOwner}/{GitHubRepo}";
                     throw;
@@ -1358,7 +1461,8 @@ namespace HLMCUpdater
                     }
 
                     string exeName = exeItem.path;
-                    string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
+                    string encodedExeName = exeName != null ? Uri.EscapeDataString(exeName) : "";
+                    string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{encodedExeName}";
 
                     UpdateStatus("Downloading updater update...");
 
@@ -1547,7 +1651,8 @@ namespace HLMCUpdater
                         if (exeItem?.path != null)
                         {
                             string exeName = exeItem.path;
-                            var downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(exeName)}";
+                            string encodedExeName = exeName != null ? Uri.EscapeDataString(exeName) : "";
+                            var downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{encodedExeName}";
                             steps.Add($"Step 4: Found exe at {downloadUrl}");
 
                             steps.Add("Step 5: Starting exe download");
@@ -1715,6 +1820,14 @@ namespace HLMCUpdater
             [System.Text.Json.Serialization.JsonPropertyName("default_branch")]
             public string? DefaultBranch { get; set; }
             public bool Private { get; set; }
+        }
+
+        class RateLimitInfo
+        {
+            public int? Limit { get; set; }
+            public int? Remaining { get; set; }
+            public DateTimeOffset? ResetTime { get; set; }
+            public bool IsLimited => Remaining <= 0;
         }
     }
 }
