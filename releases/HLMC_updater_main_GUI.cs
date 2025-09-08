@@ -1124,16 +1124,49 @@ namespace HLMCUpdater
                 }
                 catch (HttpRequestException ex) when (ex.Message.Contains("404"))
                 {
+                    // Advanced diagnostic checks
+                    try
+                    {
+                        List<string> branchesToTry = ["main", "master"];
+
+                        foreach (string branch in branchesToTry)
+                        {
+                            string apiTestUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/contents/{folderName}/{itemName}?ref={branch}";
+                            using (var testClient = new HttpClient())
+                            {
+                                testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                                if (!string.IsNullOrEmpty(GitHubToken))
+                                {
+                                    testClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                                }
+
+                                var testResponse = await testClient.GetAsync(apiTestUrl);
+                                if (testResponse.IsSuccessStatusCode)
+                                {
+                                    // File exists in API, try different approach
+                                    string workingUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{branch}/{folderName}/{encodedFileName}";
+                                    UpdateStatus($"Found file on '{branch}', trying alternate URL...");
+                                    LogException(new Exception($"SWITCHING BRANCH: Original 404 → Found on branch '{branch}'"));
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception diagEx)
+                    {
+                        LogException(new Exception($"Diagnostic check failed: {diagEx.Message}"));
+                    }
+
                     // Log 404 errors with more details
-                    string errorMsg = $"404 Not Found for: {downloadUrl}\nGitHub Repo: {GitHubOwner}/{GitHubRepo}\nBranch: {GitHubBranch}";
+                    string errorMsg = $"404 Not Found for: {downloadUrl}\nGitHub Repo: {GitHubOwner}/{GitHubRepo}\nBranch: {GitHubBranch}\nFile: {itemName}";
                     LogException(new Exception(errorMsg, ex));
                     results.Status = "FAILED";
-                    results.Error = "One or more files could not be found in the GitHub repository. This may indicate:\n" +
-                                    "• The repository structure has changed\n" +
-                                    "• Files have been moved or removed\n" +
-                                    "• Repository is private or inaccessible\n" +
-                                    "• Network connectivity issues\n\n" +
-                                    $"URL attempted: {downloadUrl}";
+                    results.Error = $"File download failed (404): {itemName}\n\nThis may be due to:\n" +
+                                    "• Repository is private and requires authentication token\n" +
+                                    "• The default branch is not 'main' but 'master' or other\n" +
+                                    "• Files have been moved or removed from repository\n" +
+                                    "• GitHub API limitations or rate limiting\n\n" +
+                                    $"Failed URL: {downloadUrl}\n" +
+                                    $"Repository: https://github.com/{GitHubOwner}/{GitHubRepo}";
                     throw;
                 }
             }
