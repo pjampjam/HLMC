@@ -1096,8 +1096,7 @@ namespace HLMCUpdater
             {
                 string itemType = folderName.ToUpper().TrimEnd('S');
                 results.Added.Add($"{itemType}: {itemName}");
-                string itemPath = $"{folderName}/{itemName}";
-                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{Uri.EscapeDataString(itemPath)}";
+                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{folderName}/{Uri.EscapeDataString(itemName!)}";
                 string destination = Path.Combine(localDirPath, itemName!);
                 currentDownloads.Add(destination);
 
