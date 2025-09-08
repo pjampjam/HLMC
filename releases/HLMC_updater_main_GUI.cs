@@ -518,6 +518,19 @@ namespace HLMCUpdater
             catch { } // Ignore directory-level errors
         }
 
+        private string GitHubUriEncodeFileName(string fileName)
+        {
+            // GitHub raw URLs require specific encoding:
+            // Only encode characters that GitHub requires to be encoded for raw content
+            return fileName
+                .Replace("+", "%2B")  // + needs encoding
+                .Replace(" ", "%20")   // Spaces need encoding
+                .Replace("#", "%23")   // # needs encoding
+                .Replace("&", "%26")   // & needs encoding
+                .Replace("?", "%3F")   // ? needs encoding
+                .Replace("%", "%25");  // % needs encoding (must be last!)
+        }
+
         private void CleanupOrphanedFiles()
         {
             try
@@ -1096,7 +1109,8 @@ namespace HLMCUpdater
             {
                 string itemType = folderName.ToUpper().TrimEnd('S');
                 results.Added.Add($"{itemType}: {itemName}");
-                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{folderName}/{Uri.EscapeDataString(itemName!)}";
+                string encodedFileName = GitHubUriEncodeFileName(itemName!);
+                string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{folderName}/{encodedFileName}";
                 string destination = Path.Combine(localDirPath, itemName!);
                 currentDownloads.Add(destination);
 
