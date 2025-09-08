@@ -25,8 +25,279 @@ namespace HLMCUpdater
         const string GitHubOwner = "pjampjam";
         const string GitHubRepo = "HLMC";
         const string GitHubBranch = "main";
-        const string GitHubToken = ""; // Provided for testing purposes
         private static readonly string EmbeddedVersion = Assembly.GetExecutingAssembly().GetName().Version!.ToString();
+
+        private string? _gitHubToken;
+        private bool? _debugLoggingEnabled;
+        private bool DebugLoggingEnabled
+        {
+            get
+            {
+                if (_debugLoggingEnabled == null)
+                {
+                    _debugLoggingEnabled = true;
+                    // Load from config
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                    string configPath = Path.Combine(appDataDir, "config.json");
+                    if (File.Exists(configPath))
+                    {
+                        try
+                        {
+                            var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
+                            if (config != null && config.TryGetValue("DebugLoggingEnabled", out var debugEnabled) && bool.TryParse(debugEnabled, out bool result))
+                            {
+                                _debugLoggingEnabled = result;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                return _debugLoggingEnabled.Value;
+            }
+            set
+            {
+                _debugLoggingEnabled = value;
+                // Save to config
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                if (!Directory.Exists(appDataDir))
+                {
+                    Directory.CreateDirectory(appDataDir);
+                }
+                string configPath = Path.Combine(appDataDir, "config.json");
+                var config = new Dictionary<string, string>();
+                if (File.Exists(configPath))
+                {
+                    try
+                    {
+                        config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath)) ?? new Dictionary<string, string>();
+                    }
+                    catch { }
+                }
+                config["GitHubToken"] = _gitHubToken ?? "";
+                config["MinecraftPath"] = MinecraftPath;
+                config["DebugLoggingEnabled"] = value.ToString();
+                config["DiscordWebhookUrl"] = DiscordWebhookUrl;
+                try
+                {
+                    File.WriteAllText(configPath, JsonSerializer.Serialize(config));
+                }
+                catch { }
+            }
+        }
+
+        private string GitHubToken
+        {
+            get
+            {
+                if (_gitHubToken == null)
+                {
+                    _gitHubToken = "";
+                    // Load from config
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                    string configPath = Path.Combine(appDataDir, "config.json");
+                    if (File.Exists(configPath))
+                    {
+                        try
+                        {
+                            var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
+                            if (config != null && config.TryGetValue("GitHubToken", out var token) && !string.IsNullOrEmpty(token))
+                            {
+                                _gitHubToken = token;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                return _gitHubToken;
+            }
+            set
+            {
+                _gitHubToken = value ?? "";
+                // Save to config
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                if (!Directory.Exists(appDataDir))
+                {
+                    Directory.CreateDirectory(appDataDir);
+                }
+                string configPath = Path.Combine(appDataDir, "config.json");
+                var config = new Dictionary<string, string>();
+                if (File.Exists(configPath))
+                {
+                    try
+                    {
+                        config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath)) ?? new Dictionary<string, string>();
+                    }
+                    catch { }
+                }
+                config["GitHubToken"] = _gitHubToken;
+                config["MinecraftPath"] = MinecraftPath; // Ensure MinecraftPath is also saved
+                config["DebugLoggingEnabled"] = DebugLoggingEnabled.ToString();
+                config["DiscordWebhookUrl"] = DiscordWebhookUrl;
+                try
+                {
+                    File.WriteAllText(configPath, JsonSerializer.Serialize(config));
+                }
+                catch { }
+            }
+        }
+
+        private bool PromptForGitHubToken()
+{
+    var result = MessageBox.Show(
+        "GitHub API requests rate limit exceeded.\n\n" +
+        "To ensure smooth updates, please provide a GitHub Personal Access Token.\n\n" +
+        "This token will be stored securely in your app settings.\n\n" +
+        "Would you like to enter a token now?",
+        "Rate Limit Exceeded",
+        MessageBoxButtons.YesNo,
+        MessageBoxIcon.Warning
+    );
+
+            if (result == DialogResult.Yes)
+            {
+                string token = "";
+                bool valid = false;
+                while (!valid)
+                {
+                    using (var inputForm = new Form())
+                    {
+                        inputForm.Text = "Enter GitHub Personal Access Token";
+                        inputForm.Size = new Size(400, 200);
+                        inputForm.StartPosition = FormStartPosition.CenterParent;
+                        inputForm.BackColor = Color.FromArgb(30, 30, 30);
+                        inputForm.ForeColor = Color.White;
+                        inputForm.FormBorderStyle = FormBorderStyle.FixedDialog;
+                        inputForm.MaximizeBox = false;
+                        inputForm.MinimizeBox = false;
+
+                        var label = new Label
+                        {
+                            Text = "Paste your GitHub Personal Access Token:\n\n" +
+                                   "Create token at: https://github.com/settings/tokens\n\n" +
+                                   "• Create an account or Log-in and then 'Generate new token'",
+                            AutoSize = true,
+                            Location = new Point(10, 10),
+                            ForeColor = Color.White
+                        };
+                        inputForm.Controls.Add(label);
+
+                        var textBox = new TextBox
+                        {
+                            UseSystemPasswordChar = true,
+                            Location = new Point(10, 90),
+                            Size = new Size(360, 20),
+                            BackColor = Color.FromArgb(50, 50, 50),
+                            ForeColor = Color.White,
+                            BorderStyle = BorderStyle.FixedSingle
+                        };
+                        inputForm.Controls.Add(textBox);
+
+                        var okButton = new Button
+                        {
+                            Text = "Save Token",
+                            DialogResult = DialogResult.OK,
+                            Location = new Point(180, 120),
+                            Size = new Size(100, 30)
+                        };
+                        inputForm.Controls.Add(okButton);
+                        inputForm.AcceptButton = okButton;
+
+                        var cancelButton = new Button
+                        {
+                            Text = "Skip",
+                            DialogResult = DialogResult.Cancel,
+                            Location = new Point(290, 120),
+                            Size = new Size(80, 30)
+                        };
+                        inputForm.Controls.Add(cancelButton);
+                        inputForm.CancelButton = cancelButton;
+
+                        if (inputForm.ShowDialog() == DialogResult.OK)
+                        {
+                            token = textBox.Text.Trim();
+                            if (!string.IsNullOrEmpty(token) && token.Length >= 40) // GitHub tokens are typically 40+ chars
+                            {
+                                GitHubToken = token;
+                                valid = true;
+                                return true;
+                            }
+                            else
+                            {
+                                MessageBox.Show("Invalid token format. Please enter a valid GitHub Personal Access Token.", "Invalid Token", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        }
+                        else
+                        {
+                            valid = true; // User cancelled, break loop
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        private string? _discordWebhookUrl;
+        private string DiscordWebhookUrl
+        {
+            get
+            {
+                if (_discordWebhookUrl == null)
+                {
+                    _discordWebhookUrl = "https://discord.com/api/webhooks/1414627892788334762/15hNMv6Bjc6UTz1ad54mwomTL0CN6mX93q_W2OUKsfMq-JQMayjZzSqeMnfXyeo7qh0g";
+                    // Load from config
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                    string configPath = Path.Combine(appDataDir, "config.json");
+                    if (File.Exists(configPath))
+                    {
+                        try
+                        {
+                            var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
+                            if (config != null && config.TryGetValue("DiscordWebhookUrl", out var url) && !string.IsNullOrEmpty(url))
+                            {
+                                _discordWebhookUrl = url;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                return _discordWebhookUrl;
+            }
+            set
+            {
+                _discordWebhookUrl = value ?? "";
+                // Save to config
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                if (!Directory.Exists(appDataDir))
+                {
+                    Directory.CreateDirectory(appDataDir);
+                }
+                string configPath = Path.Combine(appDataDir, "config.json");
+                var config = new Dictionary<string, string>();
+                if (File.Exists(configPath))
+                {
+                    try
+                    {
+                        config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath)) ?? new Dictionary<string, string>();
+                    }
+                    catch { }
+                }
+                config["GitHubToken"] = GitHubToken;
+                config["MinecraftPath"] = MinecraftPath;
+                config["DebugLoggingEnabled"] = DebugLoggingEnabled.ToString();
+                config["DiscordWebhookUrl"] = _discordWebhookUrl;
+                try
+                {
+                    File.WriteAllText(configPath, JsonSerializer.Serialize(config));
+                }
+                catch { }
+            }
+        }
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
@@ -44,6 +315,137 @@ namespace HLMCUpdater
         TextBox summaryTextBox;
         CancellationTokenSource _cts;
         private List<string> currentDownloads = new List<string>();
+
+        private string GetWindowsVersion()
+        {
+            // Method 1: Check build number first (most reliable for Win11 detection)
+            try
+            {
+                var osVersion = Environment.OSVersion.Version;
+                if (osVersion.Build >= 22000) return "Win11";
+                if (osVersion.Build >= 10240 && osVersion.Major == 10) return "Win10";
+                if (osVersion.Build >= 9200) return "Win81";
+                if (osVersion.Build >= 7600) return "Win7";
+            }
+            catch { }
+
+            try
+            {
+                // Method 2: Check registry for additional version info
+                Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+                if (key != null)
+                {
+                    // Get Windows version from registry as fallback
+                    string? productName = key.GetValue("ProductName") as string;
+                    if (!string.IsNullOrEmpty(productName))
+                    {
+                        if (productName.Contains("11")) return "Win11";
+                        if (productName.Contains("10")) return "Win10";
+                        if (productName.Contains("8.1") || productName.Contains("8.1")) return "Win81";
+                        if (productName.Contains("8")) return "Win8";
+                        if (productName.Contains("7")) return "Win7";
+                        if (productName.Contains("Vista")) return "Vista";
+                        if (productName.Contains("XP")) return "XP";
+                    }
+
+                    // Check CurrentMajorVersionNumber for more reliable detection
+                    int? majorVersion = key.GetValue("CurrentMajorVersionNumber") as int?;
+                    int? minorVersion = key.GetValue("CurrentMinorVersionNumber") as int?;
+                    string? currentBuild = key.GetValue("CurrentBuild") as string;
+
+                    // Windows 11 has major version 10, but build >= 22000
+                    if (majorVersion.HasValue && majorVersion.Value == 10 && !string.IsNullOrEmpty(currentBuild))
+                    {
+                        if (int.TryParse(currentBuild, out int buildNum))
+                        {
+                            if (buildNum >= 22000) return "Win11";
+                            return "Win10";
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Skip WMI method for compatibility
+
+            // Last resort
+            try
+            {
+                string osInfo = Environment.OSVersion.VersionString.ToLowerInvariant();
+                if (osInfo.Contains("11")) return "Win11";
+                if (osInfo.Contains("10")) return "Win10";
+                if (osInfo.Contains("8.1")) return "Win81";
+                if (osInfo.Contains("8")) return "Win8";
+                if (osInfo.Contains("7")) return "Win7";
+                return "Win" + Environment.OSVersion.Version.Major.ToString();
+            }
+            catch { }
+
+            return "WinUnknown";
+        }
+
+        private string DeviceIdentifier
+        {
+            get
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                string deviceIdFile = Path.Combine(appDataDir, ".device_id");
+
+                if (File.Exists(deviceIdFile))
+                {
+                    try
+                    {
+                        string stored = File.ReadAllText(deviceIdFile).Trim();
+                        // If stored ID has a prefix (old format), extract just the letters/numbers part
+                        if (stored.Contains('_'))
+                        {
+                            string[] parts = stored.Split('_');
+                            if (parts.Length >= 2 && parts[1].Length == 8 && parts[1].All(c => char.IsLetterOrDigit(c)))
+                            {
+                                return parts[1];
+                            }
+                        }
+                        return stored;
+                    }
+                    catch { }
+                }
+
+                // Generate new device ID with 8 alphanumeric characters
+                string randomCombo = Guid.NewGuid().ToString().Substring(0, 8).ToUpperInvariant();
+                char[] validChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".ToCharArray();
+                string deviceId = "";
+                foreach (char c in randomCombo)
+                {
+                    if (validChars.Contains(c))
+                    {
+                        deviceId += c;
+                    }
+                }
+                if (deviceId.Length < 8)
+                {
+                    // Pad with random valid characters if needed
+                    Random rnd = new Random();
+                    while (deviceId.Length < 8)
+                    {
+                        deviceId += validChars[rnd.Next(validChars.Length)];
+                    }
+                }
+
+                // Store it for subsequent log files
+                try
+                {
+                    if (!Directory.Exists(appDataDir))
+                    {
+                        Directory.CreateDirectory(appDataDir);
+                    }
+                    File.WriteAllText(deviceIdFile, deviceId);
+                }
+                catch { }
+
+                return deviceId;
+            }
+        }
 
         private string MinecraftPath
         {
@@ -156,7 +558,10 @@ namespace HLMCUpdater
                 string configPath = Path.Combine(configDir, "config.json");
                 var config = new Dictionary<string, string>
                 {
-                    ["MinecraftPath"] = value
+                    ["GitHubToken"] = GitHubToken,
+                    ["MinecraftPath"] = value,
+                    ["DebugLoggingEnabled"] = DebugLoggingEnabled.ToString(),
+                    ["DiscordWebhookUrl"] = DiscordWebhookUrl
                 };
                 try
                 {
@@ -384,7 +789,7 @@ namespace HLMCUpdater
             closeButton = new Button
             {
                 Text = "Close",
-                Size = new Size(120, 40),
+                Size = new Size(150, 40),
                 Font = new Font("Arial", 10),
                 Anchor = AnchorStyles.Bottom,
                 BackColor = Color.FromArgb(60, 180, 75),
@@ -392,9 +797,9 @@ namespace HLMCUpdater
                 FlatStyle = FlatStyle.Flat,
                 Location = new Point((summaryPanel.Width - 120) / 2, summaryPanel.Height)
             };
+            closeButton.Click += CloseButton_Click;
             closeButton.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 50);
             closeButton.FlatAppearance.BorderSize = 2;
-            closeButton.Click += (s, e) => Application.Exit();
             summaryPanel.Controls.Add(closeButton);
 
             this.FormClosing += (s, e) =>
@@ -420,17 +825,31 @@ namespace HLMCUpdater
             this.Load += MainForm_Load;
             this.Resize += new EventHandler(this.MainForm_Resize);
         }
-        private static void LogException(Exception ex)
+        private void LogException(Exception ex)
         {
+            // Check debug logging setting
             try
             {
-                string logPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory, "updater_error.log");
-                File.WriteAllText(logPath, $"{DateTime.Now}: {ex.ToString()}");
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                string configPath = Path.Combine(appDataDir, "config.json");
+                if (File.Exists(configPath))
+                {
+                    var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configPath));
+                    if (config != null && config.TryGetValue("DebugLoggingEnabled", out var debugEnabled) && bool.TryParse(debugEnabled, out bool result) && result)
+                    {
+                        string deviceId = DeviceIdentifier;
+                        string logPath = Path.Combine(appDataDir, $"{deviceId}_error.log");
+                        File.WriteAllText(logPath, $"{DateTime.Now}: {ex.ToString()}");
+                        return;
+                    }
+                }
             }
             catch
             {
                 // If logging fails, ignore
             }
+            // If debug logging is disabled or loading failed, don't log
         }
 
         private async Task CancelDownload(object? sender, EventArgs e)
@@ -520,15 +939,9 @@ namespace HLMCUpdater
 
         private string GitHubUriEncodeFileName(string fileName)
         {
-            // GitHub raw URLs require specific encoding:
-            // Only encode characters that GitHub requires to be encoded for raw content
-            return fileName
-                .Replace("+", "%2B")  // + needs encoding
-                .Replace(" ", "%20")   // Spaces need encoding
-                .Replace("#", "%23")   // # needs encoding
-                .Replace("&", "%26")   // & needs encoding
-                .Replace("?", "%3F")   // ? needs encoding
-                .Replace("%", "%25");  // % needs encoding (must be last!)
+            // Use proper URL encoding for GitHub URLs - this handles all special characters safely
+            // GitHub raw and API URLs need proper encoding for special characters in filenames
+            return Uri.EscapeDataString(fileName);
         }
 
         private void CleanupOrphanedFiles()
@@ -819,6 +1232,254 @@ namespace HLMCUpdater
             await Task.Delay(200);
         }
 
+        private void CloseButton_Click(object? sender, EventArgs e)
+        {
+            // Check if this is an error report
+            if (closeButton.Text == "Report and Close")
+            {
+                GenerateErrorReport();
+            }
+
+            Application.Exit();
+        }
+
+        private async Task<bool> SendViaDiscordWebhook(List<string> errorFiles, string deviceId, string timestamp, string errorDetails)
+        {
+            if (string.IsNullOrEmpty(DiscordWebhookUrl))
+            {
+                return false;
+            }
+
+            try
+            {
+                using (var httpClient = new HttpClient())
+                {
+                    httpClient.Timeout = TimeSpan.FromSeconds(10); // 10 second timeout
+
+                    var payload = new
+                    {
+                        embeds = new[]
+                        {
+                            new
+                            {
+                                title = "HLMC Updater Error Report",
+                                color = 16711680, // Red color
+                                fields = new[]
+                                {
+                                    new { name = "Device ID", value = deviceId, inline = true },
+                                    new { name = "Timestamp", value = timestamp, inline = true },
+                                    new { name = "Error Details", value = errorDetails.Length > 500 ? errorDetails.Substring(0, 500) + "..." : errorDetails, inline = false }
+                                }
+                            }
+                        }
+                    };
+
+                    string jsonPayload = JsonSerializer.Serialize(payload);
+
+                    using (var content = new MultipartFormDataContent())
+                    {
+                        content.Add(new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json"), "payload_json");
+
+                        // Attach error files
+                        int fileIndex = 0;
+                        foreach (var filePath in errorFiles.Where(File.Exists))
+                        {
+                            var fileName = Path.GetFileName(filePath);
+                            var fileStream = File.OpenRead(filePath);
+                            var fileContent = new StreamContent(fileStream);
+                            content.Add(fileContent, $"files[{fileIndex}]", fileName);
+                            fileIndex++;
+                        }
+
+                        var response = await httpClient.PostAsync(DiscordWebhookUrl, content);
+                        response.EnsureSuccessStatusCode();
+
+                        // Clean up file streams
+                        foreach (var item in content)
+                        {
+                            if (item is StreamContent streamContent)
+                            {
+                                await streamContent.ReadAsStreamAsync().ContinueWith(t =>
+                                {
+                                    if (t.IsCompletedSuccessfully && t.Result != null)
+                                    {
+                                        t.Result.Dispose();
+                                    }
+                                });
+                            }
+                        }
+                    }
+
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log the error for debugging
+                LogException(ex);
+                return false;
+            }
+        }
+
+        private async void GenerateErrorReport()
+        {
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+
+                List<string> errorFiles = new List<string>();
+                string deviceId = DeviceIdentifier;
+                string[] possibleFiles = {
+                    $"{deviceId}_error.log",
+                    $"{deviceId}_main_error.txt",
+                    $"{deviceId}_update_check_results.txt",
+                    $"main_error.txt", // Keep old format for backward compatibility
+                    $"update_check_results.txt"
+                };
+
+                // Check for debug files as well
+                if (Directory.Exists(appDataDir))
+                {
+                    foreach (var file in possibleFiles)
+                    {
+                        string filePath = Path.Combine(appDataDir, file);
+                        if (File.Exists(filePath))
+                        {
+                            errorFiles.Add(filePath);
+                        }
+                    }
+
+                    // Also add sync debug files with device prefix
+                    foreach (var file in Directory.GetFiles(appDataDir, $"{deviceId}_sync_debug_*.txt"))
+                    {
+                        errorFiles.Add(file);
+                    }
+                }
+
+                // Attempt Discord webhook send
+                bool webhookSent = false;
+                if (errorFiles.Any())
+                {
+                    string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                    string errorDetails = $"Error report generated. Debug logging found {errorFiles.Count()} file(s): {string.Join(", ", errorFiles.Select(Path.GetFileName))}";
+
+                    // Use default webhook URL if not set
+                    if (string.IsNullOrEmpty(DiscordWebhookUrl))
+                    {
+                        // Just use provided webhook - no prompt needed since it will just fail silently if invalid
+                        DiscordWebhookUrl = "https://discord.com/api/webhooks/1414627892788334762/15hNMv6Bjc6UTz1ad54mwomTL0CN6mX93q_W2OUKsfMq-JQMayjZzSqeMnfXyeo7qh0g";
+                    }
+
+                    // Send via webhook if URL is configured
+                    if (!string.IsNullOrEmpty(DiscordWebhookUrl))
+                    {
+                        // Show sending progress
+                        using (var progressForm = new Form())
+                        {
+                            progressForm.Text = "Sending Report";
+                            progressForm.Size = new Size(300, 100);
+                            progressForm.StartPosition = FormStartPosition.CenterParent;
+                            progressForm.BackColor = Color.FromArgb(30, 30, 30);
+                            progressForm.ForeColor = Color.White;
+                            progressForm.FormBorderStyle = FormBorderStyle.FixedDialog;
+                            progressForm.ControlBox = false;
+
+                            var label = new Label
+                            {
+                                Text = "Sending report to Discord...",
+                                AutoSize = true,
+                                Location = new Point(20, 20),
+                                ForeColor = Color.White
+                            };
+                            progressForm.Controls.Add(label);
+
+                            progressForm.Show();
+                            progressForm.Refresh();
+
+                            webhookSent = await SendViaDiscordWebhook(errorFiles, deviceId, timestamp, errorDetails);
+
+                            progressForm.Hide();
+                        }
+                    }
+
+                    if (webhookSent)
+                    {
+                        MessageBox.Show(
+                            "✅ Error report successfully sent to Discord webhook!\n\n" +
+                            $"📍 Location: {appDataDir}\n\n" +
+                            "The debug logs and files have been automatically shared with the development team.",
+                            "Report Sent Successfully",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information
+                        );
+
+                        // Still open the directory for user's reference
+                        try
+                        {
+                            Process.Start("explorer.exe", appDataDir);
+                        }
+                        catch { }
+                    }
+                    else if (errorFiles.Any())
+                    {
+                        MessageBox.Show(
+                            "Error files found!\n\n" +
+                            "Please share the following files for diagnosis:\n" +
+                            $"- {string.Join("\n- ", errorFiles.Select(Path.GetFileName))}\n\n" +
+                            $"📍 Location: {appDataDir}\n\n" +
+                            "📋 Publishing Options:\n" +
+                            "• Create a new GitHub Issue:\n" +
+                            "   https://github.com/pjampjam/HLMC/issues/new\n" +
+                            "• Anonymous file upload sites (no sign-in required):\n" +
+                            "   • https://pastebin.com/ (API-friendly)\n" +
+                            "   • https://0bin.net/ (encrypted, anonymous)\n" +
+                            "   • https://gromble.io/ (file hosting)\n" +
+                            "• Free paste sites:\n" +
+                            "   • https://hastebin.com/\n" +
+                            "   • https://gist.github.com/\n\n" +
+                            "☕️ Help support the project by helping with bug reports!",
+                            "Error Report Generated",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information
+                        );
+
+                        // Open the directory for user to easily access files
+                        try
+                        {
+                            Process.Start("explorer.exe", appDataDir);
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        MessageBox.Show(
+                            "Debug logging disabled - no error files generated.\n\n" +
+                            "To enable detailed error reporting:\n" +
+                            "1. Open config.json\n" +
+                            "2. Set \"DebugLoggingEnabled\": \"true\"\n" +
+                            "3. Restart and try again\n\n" +
+                            $"📍 Config location: {appDataDir}",
+                            "Debug Logging Disabled",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error generating report: {ex.Message}\n\n" +
+                    "Please manually locate error files in:\n" +
+                    $"{Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)}\\HLMCUpdater",
+                    "Report Generation Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -852,6 +1513,103 @@ namespace HLMCUpdater
                 UpdateStatus("Fetching repository file list...");
                 var repoTree = await FetchRepoTree();
 
+                // Only check rate limit if we suspect it might be an issue (<= 10 requests)
+                RateLimitInfo? initialRateLimitInfo = null;
+                if (!string.IsNullOrEmpty(GitHubToken) || new Random().Next(10) == 0) // 10% chance check without token
+                {
+                    UpdateStatus("🔍 Checking GitHub rate limit status...");
+                    initialRateLimitInfo = await CheckGitHubRateLimit();
+
+                    if (initialRateLimitInfo.Remaining.HasValue && initialRateLimitInfo.Limit.HasValue)
+                    {
+                        if (initialRateLimitInfo.Remaining.Value <= 10) // Only show warning when critically low
+                        {
+                            string rateDisplay = $"GitHub API: {initialRateLimitInfo.Remaining.Value}/{initialRateLimitInfo.Limit.Value} requests ⚠️ CRITICAL!";
+                            UpdateStatus(rateDisplay);
+                            await Task.Delay(1000); // Show briefly
+                        }
+                    }
+                }
+
+                if (initialRateLimitInfo != null && (initialRateLimitInfo.IsLimited || (initialRateLimitInfo.Remaining.HasValue && initialRateLimitInfo.Remaining.Value == 0)))
+                {
+                    // Handle fully exhausted rate limit same way as existing code
+                    UpdateStatus("🚫 RATE LIMITED! GitHub API requests exhausted");
+
+                    if (initialRateLimitInfo.ResetTime.HasValue)
+                    {
+                        var resetTime = initialRateLimitInfo.ResetTime.Value;
+                        var waitTime = resetTime - DateTimeOffset.Now;
+
+                        if (waitTime.TotalSeconds > 0)
+                        {
+                            DialogResult addTokenResult = MessageBox.Show(
+                                $"🔥 GitHub has blocked your requests due to rate limiting!\n\n" +
+                                $"• Rate limit will reset at: {resetTime:G}\n" +
+                                $"• Estimated wait time: {Math.Ceiling(waitTime.TotalMinutes):F0} minutes\n\n" +
+                                $"SOLUTION: Add a GitHub Personal Access Token to avoid rate limits\n" +
+                                $"📋 Create at: https://github.com/settings/tokens\n\n" +
+                                "Would you like to add a token now?",
+                                "GitHub Rate Limit Exceeded!",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning
+                            );
+
+                            if (addTokenResult == DialogResult.Yes)
+                            {
+                                if (PromptForGitHubToken())
+                                {
+                                    UpdateStatus("Token added - continuing update...");
+                                    // Don't return, continue with the update
+                                }
+                                else
+                                {
+                                    Application.Exit();
+                                    return;
+                                }
+                            }
+                            else
+                            {
+                                Application.Exit();
+                                return;
+                            }
+                        }
+                    }
+
+                    // Fallback if no reset time available
+                    DialogResult fallbackResult = MessageBox.Show(
+                        "🚫 GitHub API rate limit exceeded!\n\n" +
+                        "This is likely why you're getting error 404.\n\n" +
+                        "SOLUTIONS:\n" +
+                        "• Add a GitHub Personal Access Token (recommended)\n" +
+                        "• Wait 1 hour for automatic reset\n" +
+                        "• Check GitHub status at status.github.com\n\n" +
+                        "Would you like to add a GitHub token now?",
+                        "GitHub Rate Limit - Action Required!",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Exclamation
+                    );
+
+                    if (fallbackResult == DialogResult.Yes)
+                    {
+                        if (PromptForGitHubToken())
+                        {
+                            UpdateStatus("Token added - continuing update...");
+                            // Don't return, continue with the update
+                        }
+                        else
+                        {
+                            Application.Exit();
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        Application.Exit();
+                        return;
+                    }
+                }
+
                 using (var client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromMinutes(30); // Allow longer downloads for large files
@@ -875,9 +1633,13 @@ namespace HLMCUpdater
                                 {
                                     throw new Exception("Repository not found. The repository may have been moved, renamed, or deleted.");
                                 }
+                                else if (testResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                                {
+                                    throw new Exception($"Authentication failed. Your GitHub token may be invalid or expired.\n\nPlease create a new token at: https://github.com/settings/tokens");
+                                }
                                 else
                                 {
-                                    throw new Exception($"Repository not accessible: {testResponse.StatusCode} - {testResponse.ReasonPhrase}");
+                                    throw new Exception($"Repository not accessible: {testResponse.StatusCode} - {testResponse.ReasonPhrase}\n\nIf you're using a GitHub token, it may have expired or lack required permissions.\nCreate a new token at: https://github.com/settings/tokens");
                                 }
                             }
                             var json = await testResponse.Content.ReadAsStringAsync();
@@ -984,7 +1746,20 @@ namespace HLMCUpdater
             {
                 results.Status = "FAILED";
                 results.Error = ex.ToString();
-                File.WriteAllText(Path.Combine(scriptRoot, "HLMC_updater_error.txt"), results.Error);
+
+                // Save error to HLMCUpdater appdata directory if debug enabled
+                if (DebugLoggingEnabled)
+                {
+                    try
+                    {
+                        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                        string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                        if (!Directory.Exists(appDataDir)) Directory.CreateDirectory(appDataDir);
+                        string deviceId = DeviceIdentifier;
+                        File.WriteAllText(Path.Combine(appDataDir, $"{deviceId}_main_error.txt"), results.Error);
+                    }
+                    catch { }
+                }
             }
 
             // --- Show Summary ---
@@ -998,7 +1773,35 @@ namespace HLMCUpdater
                 CenterControlX(summaryTitleLabel, summaryPanel);
                 summaryCountLabel.Text = "An error occurred during the update.";
                 CenterControlX(summaryCountLabel, summaryPanel);
-                summaryTextBox.Text = results.Error + "\r\n\r\nError details saved to HLMC_updater_error.txt";
+                summaryTextBox.Text = results.Error;
+
+                // Change close button text and adjust UI based on button content
+                bool hasError = results.Status == "FAILED";
+                if (hasError)
+                {
+                    closeButton.Text = "Report and Close";
+                    // Adjust text box size for longer error messages
+                    summaryTextBox.Height = 120;
+                    summaryTextBox.Size = new Size(summaryPanel.Width - 40, 120);
+                    CenterControlX(summaryTextBox, summaryPanel);
+                }
+                else
+                {
+                    closeButton.Text = "Close";
+                    // Use smaller size for success messages
+                    if (results.Added.Count > 0 || results.Removed.Count > 0)
+                    {
+                        summaryTextBox.Height = 100;
+                        summaryTextBox.Size = new Size(summaryPanel.Width - 40, 100);
+                    }
+                    else
+                    {
+                        // Minimal height for "no updates" message
+                        summaryTextBox.Height = 30;
+                        summaryTextBox.Size = new Size(summaryPanel.Width - 40, 30);
+                    }
+                    CenterControlX(summaryTextBox, summaryPanel);
+                }
                 summaryTextBox.Visible = true;
             }
             else
@@ -1124,15 +1927,58 @@ namespace HLMCUpdater
         private async Task SyncFolder(string folderName, string fileFilter, List<RepoItem> repoTree, SyncResults results, string scriptRoot, HttpClient client)
         {
             UpdateStatus($"Synchronizing {folderName}...");
+
+            // DEBUG: Create detailed log for troubleshooting
+            var debugLog = new List<string>();
+            if (DebugLoggingEnabled)
+            {
+                debugLog.Add($"=== SYNC FOLDER DEBUG LOG: {folderName} ===");
+                debugLog.Add($"Started at: {DateTime.Now:G}");
+                debugLog.Add($"Script root: {scriptRoot}");
+                debugLog.Add($"File filter: {fileFilter}");
+                debugLog.Add($"Total repo items: {repoTree.Count}");
+
+                debugLog.Add("\n--- REPO TREE ANALYSIS ---");
+                foreach (var item in repoTree.Where(x => x.path != null))
+                {
+                    debugLog.Add($"Repo item: {item.path} -> Type: {item.type}");
+                }
+
+                debugLog.Add($"\n--- FILTERING FOR {folderName} ---");
+            }
+
             var githubItems = repoTree.Where(x =>
                 x.path?.StartsWith(folderName + "/") == true &&
                 x.path?.Count(c => c == '/') == 1 &&
                 x.type == "blob").ToList();
 
-            if (!githubItems.Any()) return;
+            if (DebugLoggingEnabled)
+            {
+                debugLog.Add($"{githubItems.Count} items found for {folderName}");
+
+                foreach (var item in githubItems.Where(x => x.path != null))
+                {
+                    debugLog.Add($"  - Filtered item: {item.path} -> Type: {item.type}");
+                }
+            }
+
+            if (!githubItems.Any())
+            {
+                if (DebugLoggingEnabled)
+                {
+                    debugLog.Add($"NO ITEMS TO PROCESS in {folderName}");
+                    // Save to appdata directory instead of script root
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                    if (!Directory.Exists(appDataDir)) Directory.CreateDirectory(appDataDir);
+                    string deviceId = DeviceIdentifier;
+                    System.IO.File.WriteAllText(Path.Combine(appDataDir, $"{deviceId}_sync_debug_{folderName}.txt"), string.Join("\n", debugLog));
+                }
+                return;
+            }
 
             string localDirPath = Path.Combine(scriptRoot, folderName);
-            
+
             // Simplified null check and directory creation
             if (string.IsNullOrEmpty(localDirPath))
             {
@@ -1161,62 +2007,217 @@ namespace HLMCUpdater
 
             foreach (var itemName in added.Where(x => !string.IsNullOrEmpty(x)))
             {
+                if (DebugLoggingEnabled)
+                {
+                    debugLog.Add($"\n--- PROCESSING FILE: {itemName} ---");
+                }
+
                 string itemType = folderName.ToUpper().TrimEnd('S');
                 results.Added.Add($"{itemType}: {itemName}");
+
+                if (DebugLoggingEnabled)
+                {
+                    debugLog.Add($"Item type: {itemType}");
+                    debugLog.Add($"Original filename: {itemName}");
+
+                    // Check if file exists in repo tree (double verification)
+                    var matchingRepoItem = githubItems.FirstOrDefault(x => x.path == $"{folderName}/{itemName}");
+                    debugLog.Add($"Found in repo tree: {matchingRepoItem != null}");
+                }
+
                 string encodedFileName = GitHubUriEncodeFileName(itemName!);
+                if (DebugLoggingEnabled)
+                {
+                    debugLog.Add($"Encoded filename: {encodedFileName}");
+                }
+
                 string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{folderName}/{encodedFileName}";
                 string destination = Path.Combine(localDirPath, itemName!);
                 currentDownloads.Add(destination);
 
+                if (DebugLoggingEnabled)
+                {
+                    debugLog.Add($"Download URL: {downloadUrl}");
+                    debugLog.Add($"Destination: {destination}");
+                    debugLog.Add($"Download start time: {DateTime.Now:G}");
+                }
+
                 // Debug: Log the download URL and check repository structure
                 UpdateStatus($"Downloading {itemType}: {itemName} from {downloadUrl}");
-                LogException(new Exception($"Download URL: {downloadUrl}"));
+                if (DebugLoggingEnabled)
+                {
+                    LogException(new Exception($"Download URL: {downloadUrl}"));
+                }
 
                 try
                 {
-                    await DownloadFileWithProgress(downloadUrl, destination, _cts.Token, client);
+                    bool downloadSuccess = await DownloadFileWithRobustHandling(downloadUrl, destination, _cts.Token, client, itemName!);
+                    if (downloadSuccess)
+                    {
+                        if (DebugLoggingEnabled)
+                        {
+                            debugLog.Add($"✅ DOWNLOAD SUCCESSFUL: {itemName}");
+                        }
+                    }
+                    else
+                    {
+                        if (DebugLoggingEnabled)
+                        {
+                            debugLog.Add($"❌ DOWNLOAD FAILED: {itemName} - Skipping");
+                        }
+                        results.Added.Remove($"{itemType}: {itemName}");
+                        currentDownloads.Remove(destination);
+                        continue; // Skip to next file instead of crashing entire process
+                    }
                 }
                 catch (HttpRequestException ex) when (ex.Message.Contains("404"))
                 {
-                    // Check for rate limiting first
-                    var rateLimitInfo = await CheckGitHubRateLimit();
-                    if (rateLimitInfo.IsLimited)
+                    if (DebugLoggingEnabled)
                     {
+                        debugLog.Add($"❌ 404 ERROR FOR: {itemName}");
+                        debugLog.Add($"Full exception: {ex.Message}");
+                        debugLog.Add($"URL attempted: {downloadUrl}");
+                        debugLog.Add($"Step 1/8: Starting 404 diagnostic process");
+                    }
+
+                    // Check rate limit only if we suspect it might be exhausted
+                    var rateLimitInfo = new RateLimitInfo();
+                    if (DebugLoggingEnabled)
+                    {
+                        debugLog.Add($"Step 2/8: Checking GitHub rate limit status");
+                    }
+                    rateLimitInfo = await CheckGitHubRateLimit();
+                    if (DebugLoggingEnabled)
+                    {
+                        debugLog.Add($"Step 3/8: Rate limit check complete - {rateLimitInfo.Remaining}/{rateLimitInfo.Limit} requests remaining");
+                    }
+
+                    if (rateLimitInfo.Remaining <= 0)
+                    {
+                        if (DebugLoggingEnabled)
+                        {
+                            debugLog.Add($"Step 4/8: RATE LIMIT EXHAUSTED - This is likely the cause of 404");
+                        }
+                        UpdateStatus("❌ 404 error - GitHub rate limit exhausted (0 requests remaining)");
+                    }
+                    else if (rateLimitInfo.Remaining <= 10)
+                    {
+                        if (DebugLoggingEnabled)
+                        {
+                            debugLog.Add($"Step 4/8: RATE LIMIT CRITICAL - Only {rateLimitInfo.Remaining} requests left");
+                        }
+                        UpdateStatus($"❌ 404 error - GitHub rate limit very low ({rateLimitInfo.Remaining} requests remaining)");
+                    }
+                    else if (DebugLoggingEnabled)
+                    {
+                        debugLog.Add($"Step 4/8: Network/file availability issue - Rate limit appears fine");
+                    }
+
+                    // Show current rate limit status only if critically low
+                    if (rateLimitInfo.Remaining.HasValue && rateLimitInfo.Limit.HasValue && rateLimitInfo.Remaining.Value <= 10)
+                    {
+                        string rateStatus = $"GitHub API Status: {rateLimitInfo.Remaining.Value}/{rateLimitInfo.Limit.Value} ⚠️ CRITICAL!";
+                        UpdateStatus(rateStatus);
+                        await Task.Delay(1500); // Show rate limit status for 1.5 seconds
+                    }
+
+                    if (rateLimitInfo.IsLimited || (rateLimitInfo.Remaining.HasValue && rateLimitInfo.Remaining.Value == 0))
+                    {
+                        debugLog.Add($"Step 5/8: Rate limit condition met, handling rate limit scenario");
+                        UpdateStatus("🚫 RATE LIMITED! GitHub API requests exhausted");
+
                         if (rateLimitInfo.ResetTime.HasValue)
                         {
                             var resetTime = rateLimitInfo.ResetTime.Value;
                             var waitTime = resetTime - DateTimeOffset.Now;
+                            debugLog.Add($"Step 6/8: Rate reset time available - {Math.Ceiling(waitTime.TotalMinutes):F0} minutes remaining");
 
                             if (waitTime.TotalSeconds > 0)
                             {
-                                if (waitTime.TotalMinutes < 1)
+                                DialogResult addTokenResult = MessageBox.Show(
+                                    $"🔥 GitHub has blocked your requests due to rate limiting!\n\n" +
+                                    $"• Rate limit will reset at: {resetTime:G}\n" +
+                                    $"• Estimated wait time: {Math.Ceiling(waitTime.TotalMinutes):F0} minutes\n\n" +
+                                    $"SOLUTION: Add a GitHub Personal Access Token to avoid rate limits\n" +
+                                    $"📋 Create at: https://github.com/settings/tokens\n\n" +
+                                    "Would you like to add a token now?",
+                                    "GitHub Rate Limit Exceeded!",
+                                    MessageBoxButtons.YesNo,
+                                    MessageBoxIcon.Warning
+                                );
+
+                                if (addTokenResult == DialogResult.Yes)
                                 {
-                                    UpdateStatus($"Rate limited - waiting {waitTime.TotalSeconds:F0} seconds...");
+                                    debugLog.Add($"Step 7/8: User chose to add token");
+                                    if (PromptForGitHubToken())
+                                    {
+                                        debugLog.Add($"Step 8/8: Token added successfully - continuing");
+                                        UpdateStatus("Token added - continuing update...");
+                                        // Don't return, continue with the download using the token
+                                    }
+                                    else
+                                    {
+                                        debugLog.Add($"Step 8/8: User cancelled token prompt - exiting");
+                                        Application.Exit();
+                                        return;
+                                    }
                                 }
                                 else
                                 {
-                                    UpdateStatus($"Rate limited - waiting {waitTime.TotalMinutes:F0} minutes...");
-                                }
-
-                                await Task.Delay(waitTime);
-
-                                // Retry the download
-                                try
-                                {
-                                    await DownloadFileWithProgress(downloadUrl, destination, _cts.Token, client);
-                                    UpdateStatus($"Successfully downloaded after waiting: {itemName}");
-                                    return; // Success, continue with next file
-                                }
-                                catch
-                                {
-                                    // Still failed after waiting, continue with diagnostic checks
-                                    UpdateStatus("Still failing after rate limit wait, checking other issues...");
+                                    debugLog.Add($"Step 7/8: User declined to add token - exiting");
+                                    Application.Exit();
+                                    return;
                                 }
                             }
+                        }
+                        else
+                        {
+                            debugLog.Add($"Step 6/8: No rate reset time available - using fallback");
+                        }
+
+                        // Fallback if no reset time available
+                        DialogResult fallbackResult = MessageBox.Show(
+                            "🚫 GitHub API rate limit exceeded!\n\n" +
+                            "This is likely why you're getting error 404.\n\n" +
+                            "SOLUTIONS:\n" +
+                            "• Add a GitHub Personal Access Token (recommended)\n" +
+                            "• Wait 1 hour for automatic reset\n" +
+                            "• Check GitHub status at status.github.com\n\n" +
+                            "Would you like to add a GitHub token now?",
+                            "GitHub Rate Limit - Action Required!",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Exclamation
+                        );
+
+                        if (fallbackResult == DialogResult.Yes)
+                        {
+                            debugLog.Add($"Step 7/8: User chose to add token (fallback)");
+                            if (PromptForGitHubToken())
+                            {
+                                debugLog.Add($"Step 8/8: Token added successfully (fallback) - continuing");
+                                UpdateStatus("Token added - continuing update...");
+                                // Don't return, continue with the download
+                            }
+                            else
+                            {
+                                debugLog.Add($"Step 8/8: User cancelled token prompt (fallback) - exiting");
+                                Application.Exit();
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            debugLog.Add($"Step 7/8: User declined to add token (fallback) - exiting");
+                            Application.Exit();
+                            return;
                         }
                     }
 
                     // Advanced diagnostic checks if not rate limited
+                    if (DebugLoggingEnabled)
+                    {
+                        debugLog.Add($"Step 5/8: Starting advanced diagnostics - checking alternative branches");
+                    }
                     try
                     {
                         List<string> branchesToTry = ["main", "master"];
@@ -1225,6 +2226,10 @@ namespace HLMCUpdater
                         {
                             if (itemName != null)
                             {
+                                if (DebugLoggingEnabled)
+                                {
+                                    debugLog.Add($"Step 6/8: Testing branch '{branch}' for file existence");
+                                }
                                 string apiTestUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/contents/{folderName}/{Uri.EscapeDataString(itemName)}?ref={branch}";
                                 using (var testClient = new HttpClient())
                                 {
@@ -1241,46 +2246,239 @@ namespace HLMCUpdater
                                         // File exists in API, try different approach
                                         string workingUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{branch}/{folderName}/{encodedFileName}";
                                         UpdateStatus($"Found file on branch '{branch}', trying alternative approach...");
-                                        LogException(new Exception($"BRANCH DISCOVERY: File exists on '{branch}' but main branch failed"));
+                                        if (DebugLoggingEnabled)
+                                        {
+                                            debugLog.Add($"Step 7/8: File found on branch '{branch}' - attempting alternative download");
+                                            debugLog.Add($"Step 8/8: Alternative URL: {workingUrl}");
+                                            LogException(new Exception($"BRANCH DISCOVERY: File exists on '{branch}' but main branch failed"));
+                                        }
+                                    }
+                                    else if (DebugLoggingEnabled)
+                                    {
+                                        debugLog.Add($"Step 7/8: File not found on branch '{branch}' - HttpStatus {testResponse.StatusCode}");
                                     }
                                 }
                             }
                         }
+                        if (DebugLoggingEnabled)
+                        {
+                            debugLog.Add($"Step 8/8: Advanced diagnostics complete - no alternative branch found");
+                        }
                     }
                     catch (Exception diagEx)
                     {
-                        LogException(new Exception($"Diagnostic check failed: {diagEx.Message}"));
+                        if (DebugLoggingEnabled)
+                        {
+                            debugLog.Add($"Step 8/8: Diagnostic check failed with exception: {diagEx.Message}");
+                            LogException(new Exception($"Diagnostic check failed: {diagEx.Message}"));
+                        }
                     }
 
-                    // Log 404 errors with rate limit info
-                    string rateLimitAdvice = "If you're getting frequent 404s, try adding a GitHub authentication token.";
-                    if (rateLimitInfo.Limit.HasValue && rateLimitInfo.Remaining.HasValue)
+                    // Error logging handled separately
+   
+                        if (DebugLoggingEnabled)
+                        {
+                            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                            string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                            if (!Directory.Exists(appDataDir)) Directory.CreateDirectory(appDataDir);
+                            string deviceId = DeviceIdentifier;
+                            string debugFileName = Path.Combine(appDataDir, $"{deviceId}_sync_debug_{folderName}.txt");
+                            try
+                            {
+                                debugLog.Add($"Step 8/8: Writing diagnostic log to file");
+                                File.WriteAllText(debugFileName, string.Join("\n", debugLog));
+                                debugLog.Add($"Diagnostic log written to: {debugFileName}");
+                            }
+                            catch { }
+                        }
+   
+                        if (DebugLoggingEnabled)
+                        {
+                            string errorMsg = $"404 Not Found for: {downloadUrl}\nGitHub Repo: {GitHubOwner}/{GitHubRepo}\nBranch: {GitHubBranch}\nFile: {itemName}";
+                            LogException(new Exception(errorMsg, ex));
+                        }
+   
+                        // Clean up old error log files
+                        try
+                        {
+                            string oldErrorLog = Path.Combine(scriptRoot, "HLMC_updater_error.txt");
+                            string updaterErrorLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HLMCUpdater", "updater_error.log");
+                            if (File.Exists(oldErrorLog)) File.Delete(oldErrorLog);
+                            if (File.Exists(updaterErrorLog)) File.Delete(updaterErrorLog);
+                        }
+                        catch { }
+   
+                        results.Status = "FAILED";
+                        results.Error = $"File download failed (404): {itemName}\n\nPossible causes:\n" +
+                                        "• File has been removed from repository\n" +
+                                        "• Repository access issues\n" +
+                                        $"{(rateLimitInfo.Remaining <= 10 ? "• GitHub API rate limit low" : "")}\n\n" +
+                                        $"Failed URL: {downloadUrl}\n" +
+                                        $"Repository: https://github.com/{GitHubOwner}/{GitHubRepo}";
+                        throw;
+                    }
+            }
+        }
+
+        private async Task<bool> DownloadFileWithRobustHandling(string url, string destination, CancellationToken cancellationToken, HttpClient client, string itemName)
+        {
+            const int maxRetries = 3;
+            const int baseDelayMillis = 2000; // 2 seconds initial delay
+
+            for (int retryCount = 0; retryCount < maxRetries; retryCount++)
+            {
+                try
+                {
+                    // First, check if file is accessible with HEAD request
+                    if (retryCount == 0)
                     {
-                        rateLimitAdvice += $"\nGitHub API Status: {rateLimitInfo.Remaining}/{rateLimitInfo.Limit} requests remaining.";
+                        try
+                        {
+                            UpdateStatus($"Checking accessibility of {itemName}...");
+                            using (var headRequest = new HttpRequestMessage(HttpMethod.Head, url))
+                            {
+                                using (var headResponse = await client.SendAsync(headRequest, cancellationToken))
+                                {
+                                    if (!headResponse.IsSuccessStatusCode)
+                                    {
+                                        UpdateStatus($"❌ File accessibility check failed (HTTP {headResponse.StatusCode}): {itemName}");
+
+                                        if (DebugLoggingEnabled)
+                                        {
+                                            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                                            string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                                            string deviceId = DeviceIdentifier;
+
+                                            using (var logWriter = File.AppendText(Path.Combine(appDataDir, $"{deviceId}_sync_debug_mods.txt")))
+                                            {
+                                                logWriter.WriteLine($"--- HEAD REQUEST CHECK FAILED ---");
+                                                logWriter.WriteLine($"URL: {url}");
+                                                logWriter.WriteLine($"Status Code: {headResponse.StatusCode}");
+                                                logWriter.WriteLine($"Reason: {headResponse.ReasonPhrase}");
+                                                logWriter.WriteLine($"Retry attempt: {retryCount + 1}/{maxRetries}");
+                                                logWriter.WriteLine($"Time: {DateTime.Now:G}");
+                                            }
+                                        }
+
+                                        if (headResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                                        {
+                                            // If HEAD request fails with 404, try GET immediately instead of retrying
+                                            break;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        UpdateStatus($"✅ File accessible - proceeding with download of {itemName}...");
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception headEx)
+                        {
+                            if (DebugLoggingEnabled)
+                            {
+                                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                                string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                                string deviceId = DeviceIdentifier;
+
+                                using (var logWriter = File.AppendText(Path.Combine(appDataDir, $"{deviceId}_sync_debug_mods.txt")))
+                                {
+                                    logWriter.WriteLine($"--- HEAD REQUEST EXCEPTION ---");
+                                    logWriter.WriteLine($"URL: {url}");
+                                    logWriter.WriteLine($"Exception: {headEx.Message}");
+                                    logWriter.WriteLine($"Continuing with GET request...");
+                                }
+                            }
+                        }
                     }
 
-                    string errorMsg = $"404 Not Found for: {downloadUrl}\nGitHub Repo: {GitHubOwner}/{GitHubRepo}\nBranch: {GitHubBranch}\nFile: {itemName}";
-                    LogException(new Exception(errorMsg + $"\nRate Limit Info: {rateLimitInfo}", ex));
-                    results.Status = "FAILED";
-                    results.Error = $"File download failed (404): {itemName}\n\nPossible causes:\n" +
-                                    "• GitHub rate limiting (unauthenticated requests)\n" +
-                                    "• Repository is private (requires authentication)\n" +
-                                    "• Wrong branch name (use 'main' or set correct branch)\n" +
-                                    "• File has been moved or removed from repository\n\n" +
-                                    $"{rateLimitAdvice}\n\n" +
-                                    $"Failed URL: {downloadUrl}\n" +
-                                    $"Repository: https://github.com/{GitHubOwner}/{GitHubRepo}";
-                    throw;
+                    // Attempt download with robust progress handling
+                    await DownloadFileWithProgress(url, destination, cancellationToken, client, itemName, retryCount);
+
+                    // If we get here, download was successful
+                    return true;
+
+                }
+                catch (HttpRequestException ex) when (ex.Message.Contains("404"))
+                {
+                    UpdateStatus($"❌ Network 404 error for {itemName} (attempt {retryCount + 1}/{maxRetries})");
+
+                    if (DebugLoggingEnabled)
+                    {
+                        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                        string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                        string deviceId = DeviceIdentifier;
+
+                        using (var logWriter = File.AppendText(Path.Combine(appDataDir, $"{deviceId}_sync_debug_mods.txt")))
+                        {
+                            logWriter.WriteLine($"--- 404 RETRY ATTEMPT {retryCount + 1} ---");
+                            logWriter.WriteLine($"URL: {url}");
+                            logWriter.WriteLine($"Exception: {ex.Message}");
+                            logWriter.WriteLine($"Time: {DateTime.Now:G}");
+                            logWriter.WriteLine($"Next retry will be in {(baseDelayMillis * Math.Pow(2, retryCount)) / 1000} seconds");
+                        }
+                    }
+
+                    // Exponential backoff for retries
+                    if (retryCount < maxRetries - 1)
+                    {
+                        int delayMs = (int)(baseDelayMillis * Math.Pow(2, retryCount));
+                        await Task.Delay(delayMs, cancellationToken);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw; // Re-throw cancellation
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus($"❌ Download error for {itemName}: {ex.Message} (attempt {retryCount + 1}/{maxRetries})");
+
+                    if (DebugLoggingEnabled)
+                    {
+                        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                        string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                        string deviceId = DeviceIdentifier;
+
+                        using (var logWriter = File.AppendText(Path.Combine(appDataDir, $"{deviceId}_sync_debug_mods.txt")))
+                        {
+                            logWriter.WriteLine($"--- GENERAL RETRY ATTEMPT {retryCount + 1} ---");
+                            logWriter.WriteLine($"URL: {url}");
+                            logWriter.WriteLine($"Exception: {ex.Message}");
+                            logWriter.WriteLine($"Type: {ex.GetType().Name}");
+                        }
+                    }
+
+                    // Clean up partial files
+                    try { if (File.Exists(destination)) File.Delete(destination); } catch { }
+
+                    // Exponential backoff for retries
+                    if (retryCount < maxRetries - 1)
+                    {
+                        int delayMs = (int)(baseDelayMillis * Math.Pow(2, retryCount));
+                        await Task.Delay(delayMs, cancellationToken);
+                    }
                 }
             }
+
+            // All retries exhausted
+            UpdateStatus($"❌ Download failed permanently for {itemName} - skipping");
+            return false;
         }
 
         private async Task DownloadFileWithProgress(string url, string destination, CancellationToken cancellationToken, HttpClient client)
         {
+            await DownloadFileWithProgress(url, destination, cancellationToken, client, Path.GetFileName(destination), 0);
+        }
+
+        private async Task DownloadFileWithProgress(string url, string destination, CancellationToken cancellationToken, HttpClient client, string itemName, int retryAttempt = 0)
+        {
             downloadProgressBar.Visible = true;
             downloadProgressLabel.Visible = true;
             downloadProgressBar.Value = 0;
-            downloadProgressLabel.Text = "Starting download...";
+
+            string retryText = retryAttempt > 0 ? $" (Retry {retryAttempt})" : "";
+            downloadProgressLabel.Text = $"Starting download of {itemName}{retryText}...";
             CenterControlX(downloadProgressLabel, progressPanel);
 
             try
@@ -1314,12 +2512,12 @@ namespace HLMCUpdater
                                     downloadProgressBar.Value = (int)Math.Min(totalRead, downloadProgressBar.Maximum);
                                     double mbRead = Math.Round(totalRead / 1048576.0, 2);
                                     double mbTotal = Math.Round(totalBytes / 1048576.0, 2);
-                                    downloadProgressLabel.Text = $"{mbRead:F2} MB / {mbTotal:F2} MB downloaded";
+                                    downloadProgressLabel.Text = $"Downloading {itemName}{retryText}: {mbRead:F2} MB / {mbTotal:F2} MB";
                                     CenterControlX(downloadProgressLabel, progressPanel);
                                 }
                                 else
                                 {
-                                    downloadProgressLabel.Text = string.Format("{0:F2} MB downloaded", Math.Round(totalRead / 1048576.0, 2));
+                                    downloadProgressLabel.Text = string.Format("Downloading {0}{1}: {2:F2} MB", itemName, retryText, Math.Round(totalRead / 1048576.0, 2));
                                     CenterControlX(downloadProgressLabel, progressPanel);
                                 }
                                 this.Refresh();
@@ -1350,6 +2548,11 @@ namespace HLMCUpdater
                     }
                 }
                 throw;
+            }
+            catch (Exception)
+            {
+                // Clean up partial files on any other error
+                try { if (File.Exists(destination)) File.Delete(destination); } catch { }
             }
 
             currentDownloads.Remove(destination);
@@ -1538,6 +2741,17 @@ namespace HLMCUpdater
             // Cleanup any orphaned files from previous operations
             CleanupOrphanedFiles();
 
+            // Clean up old error logs
+            try
+            {
+                string minecraftDir = GetMinecraftPathWithoutPrompt();
+                string oldErrorLog = Path.Combine(minecraftDir, "HLMC_updater_error.txt");
+                string updaterErrorLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HLMCUpdater", "updater_error.log");
+                if (File.Exists(oldErrorLog)) File.Delete(oldErrorLog);
+                if (File.Exists(updaterErrorLog)) File.Delete(updaterErrorLog);
+            }
+            catch { }
+
             // Migrated old config and cache files to appdata (won't overwrite if already migrated)
             MigrateOldConfigFiles();
 
@@ -1720,10 +2934,21 @@ namespace HLMCUpdater
                 remoteVersion = "could not get";
             }
 
-            // Write results to txt file (disabled by default - uncomment if needed for debugging)
-            // string matchText = remoteVersion.Contains("could not get") ? "could not determine" : (string.Equals(currentVersion, remoteVersion, StringComparison.Ordinal) ? "True" : "False");
-            // string results = $"Current Version: {currentVersion}\nRemote Version: {remoteVersion}\nMatch: {matchText}\n\nSTEP LOG:\n{string.Join("\n", steps)}";
-            // File.WriteAllText(resultsFile, results);
+            // Write results to appdata directory if debug enabled
+            if (DebugLoggingEnabled)
+            {
+                try
+                {
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string appDataDir = Path.Combine(appData, "HLMCUpdater");
+                    if (!Directory.Exists(appDataDir)) Directory.CreateDirectory(appDataDir);
+                    string deviceId = DeviceIdentifier;
+                    string matchText = remoteVersion.Contains("could not get") ? "could not determine" : (string.Equals(currentVersion, remoteVersion, StringComparison.Ordinal) ? "True" : "False");
+                    string resultsLog = $"Current Version: {currentVersion}\nRemote Version: {remoteVersion}\nMatch: {matchText}\n\nSTEP LOG:\n{string.Join("\n", steps)}";
+                    File.WriteAllText(Path.Combine(appDataDir, $"{deviceId}_update_check_results.txt"), resultsLog);
+                }
+                catch { }
+            }
 
             if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != "could not get" && remoteVersion != currentVersion)
             {
