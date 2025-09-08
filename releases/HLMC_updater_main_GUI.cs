@@ -788,6 +788,45 @@ namespace HLMCUpdater
                 using (var client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromMinutes(30); // Allow longer downloads for large files
+
+                    // Test repository access with a simple API call
+                    UpdateStatus("Checking repository accessibility...");
+                    try
+                    {
+                        string testApiUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}";
+                        using (var testClient = new HttpClient())
+                        {
+                            testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater");
+                            if (!string.IsNullOrEmpty(GitHubToken))
+                            {
+                                testClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                            }
+                            var testResponse = await testClient.GetAsync(testApiUrl);
+                            if (!testResponse.IsSuccessStatusCode)
+                            {
+                                throw new Exception($"Repository not accessible: {testResponse.StatusCode} - {testResponse.ReasonPhrase}");
+                            }
+                            var json = await testResponse.Content.ReadAsStringAsync();
+                            var repoData = JsonSerializer.Deserialize<GitHubRepoInfo>(json);
+                            if (repoData?.Private == true && string.IsNullOrEmpty(GitHubToken))
+                            {
+                                throw new Exception("Repository is private but no authentication token is configured.");
+                            }
+                        }
+                        UpdateStatus("Repository connection confirmed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        results.Status = "FAILED";
+                        results.Error = "Could not access GitHub repository. This may be due to:\n" +
+                                       "• No internet connection\n" +
+                                       "• Repository is private and no authentication token is set\n" +
+                                       "• Repository doesn't exist or has been moved\n" +
+                                       $"• Repository URL: https://github.com/{GitHubOwner}/{GitHubRepo}\n\n" +
+                                       $"Details: {ex.Message}";
+                        throw;
+                    }
+
                     // --- Sync all folders ---
                     await SyncFolder("mods", "*.jar", repoTree, results, scriptRoot, client);
                     await SyncFolder("resourcepacks", "*.zip", repoTree, results, scriptRoot, client);
@@ -1044,8 +1083,29 @@ namespace HLMCUpdater
                 string downloadUrl = $"https://raw.githubusercontent.com/{GitHubOwner}/{GitHubRepo}/{GitHubBranch}/{itemPath}";
                 string destination = Path.Combine(localDirPath, itemName!);
                 currentDownloads.Add(destination);
-                UpdateStatus($"Downloading {itemType}: {itemName}");
-                await DownloadFileWithProgress(downloadUrl, destination, _cts.Token, client);
+
+                // Debug: Log the download URL and check repository structure
+                UpdateStatus($"Downloading {itemType}: {itemName} from {downloadUrl}");
+                LogException(new Exception($"Download URL: {downloadUrl}"));
+
+                try
+                {
+                    await DownloadFileWithProgress(downloadUrl, destination, _cts.Token, client);
+                }
+                catch (HttpRequestException ex) when (ex.Message.Contains("404"))
+                {
+                    // Log 404 errors with more details
+                    string errorMsg = $"404 Not Found for: {downloadUrl}\nGitHub Repo: {GitHubOwner}/{GitHubRepo}\nBranch: {GitHubBranch}";
+                    LogException(new Exception(errorMsg, ex));
+                    results.Status = "FAILED";
+                    results.Error = "One or more files could not be found in the GitHub repository. This may indicate:\n" +
+                                    "• The repository structure has changed\n" +
+                                    "• Files have been moved or removed\n" +
+                                    "• Repository is private or inaccessible\n" +
+                                    "• Network connectivity issues\n\n" +
+                                    $"URL attempted: {downloadUrl}";
+                    throw;
+                }
             }
         }
 
@@ -1585,6 +1645,12 @@ namespace HLMCUpdater
         class GitHubAsset
         {
             public string? BrowserDownloadUrl { get; set; }
+        }
+
+        class GitHubRepoInfo
+        {
+            public string? Visibility { get; set; }
+            public bool Private { get; set; }
         }
     }
 }
