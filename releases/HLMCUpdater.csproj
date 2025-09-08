@@ -17,8 +17,8 @@
     <AssemblyName>Holy Lois Updater</AssemblyName>
     <Product>Holy Lois Client Updater</Product>
     <Description>Updater for the Holy Lois Minecraft modpack.</Description>
-    <Version>1.1.2.0</Version>
-    <FileVersion>1.1.2.0</FileVersion>
+    <Version>1.1.2.1</Version>
+    <FileVersion>1.1.2.1</FileVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Copyright>© 2025 pjampjam innovations™</Copyright>
   </PropertyGroup>

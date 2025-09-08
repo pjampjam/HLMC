@@ -192,7 +192,7 @@ namespace HLMCUpdater
                     using (var inputForm = new Form())
                     {
                         inputForm.Text = "Enter GitHub Personal Access Token";
-                        inputForm.Size = new Size(480, 220);
+                        inputForm.Size = new Size(500, 240);
                         inputForm.StartPosition = FormStartPosition.CenterParent;
                         inputForm.BackColor = Color.FromArgb(30, 30, 30);
                         inputForm.ForeColor = Color.White;
@@ -374,6 +374,7 @@ namespace HLMCUpdater
         Label titleLabel, creditLabel, versionLabel, statusLabel, downloadProgressLabel, summaryTitleLabel, summaryCountLabel;
         Label updateStatusLabel;
         Button startButton, closeButton, cancelButton;
+        Button? setApiKeyButton = null;
         ProgressBar downloadProgressBar;
         TextBox summaryTextBox;
         CancellationTokenSource _cts;
@@ -1007,6 +1008,37 @@ namespace HLMCUpdater
             return Uri.EscapeDataString(fileName);
         }
 
+        private Dictionary<string, List<string>> CreateBaseNameMap(IEnumerable<string?> fileNames)
+        {
+            var map = new Dictionary<string, List<string>>();
+            foreach (var fileName in fileNames.Where(x => !string.IsNullOrEmpty(x)))
+            {
+                var baseName = GetBaseName(fileName!);
+                if (!map.ContainsKey(baseName))
+                    map[baseName] = new List<string>();
+                map[baseName].Add(fileName!);
+            }
+            return map;
+        }
+
+        private string GetBaseName(string fileName)
+        {
+            // Remove file extension
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+            // Remove version patterns (common mod version patterns)
+            return System.Text.RegularExpressions.Regex.Replace(nameWithoutExt, @"[-_]\d+(\.\d+)*([-_]+.*)?$", "");
+        }
+
+        private string ExtractVersion(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return "";
+
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+            var match = System.Text.RegularExpressions.Regex.Match(nameWithoutExt, @"(\d+(\.\d+)*)([^\d]*)$");
+            return match.Success ? match.Groups[1].Value + match.Groups[3].Value : "";
+        }
+
         private void CleanupOrphanedFiles()
         {
             try
@@ -1306,6 +1338,15 @@ namespace HLMCUpdater
             Application.Exit();
         }
 
+        private async void SetApiKeyButton_Click(object? sender, EventArgs e)
+        {
+            if (await PromptForGitHubTokenAsync())
+            {
+                // Close the error dialog and restart the update process
+                Application.Restart();
+            }
+        }
+
         private async Task<bool> SendViaDiscordWebhook(List<string> errorFiles, string deviceId, string timestamp, string errorDetails)
         {
             if (string.IsNullOrEmpty(DiscordWebhookUrl))
@@ -1570,6 +1611,9 @@ namespace HLMCUpdater
 
             try
             {
+                // Clear repository cache to ensure fresh data
+                ClearRepositoryCache();
+
                 if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
                 Directory.CreateDirectory(tempDir);
 
@@ -1880,6 +1924,56 @@ namespace HLMCUpdater
                     summaryTextBox.Height = 120;
                     summaryTextBox.Size = new Size(summaryPanel.Width - 40, 120);
                     CenterControlX(summaryTextBox, summaryPanel);
+
+                    // Check if this is a rate limit error and add API key setup button
+                    bool isRateLimitError = results.Error != null &&
+                                             results.Error.Contains("rate limit exceeded",
+                                             StringComparison.OrdinalIgnoreCase);
+
+                    if (isRateLimitError)
+                    {
+                        // Create and add API key setup button
+                        if (setApiKeyButton == null)
+                        {
+                            setApiKeyButton = new Button
+                            {
+                                Text = "Set API Key",
+                                Size = new Size(120, 40),
+                                Font = new Font("Arial", 10, FontStyle.Bold),
+                                BackColor = Color.FromArgb(60, 180, 75),
+                                ForeColor = Color.White,
+                                FlatStyle = FlatStyle.Flat
+                            };
+                            setApiKeyButton.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 50);
+                            setApiKeyButton.FlatAppearance.BorderSize = 1;
+                            setApiKeyButton.Click += SetApiKeyButton_Click;
+                        }
+
+                        // Change close button text since Set API Key is available
+                        closeButton.Text = "Close";
+                        closeButton.Size = new Size(100, 40); // Make it smaller
+
+                        // Position buttons side by side
+                        int totalWidth = closeButton.Width + setApiKeyButton.Width + 20; // 20px spacing
+                        int startX = (summaryPanel.Width - totalWidth) / 2;
+                        setApiKeyButton.Location = new Point(startX, summaryPanel.Height - 50);
+                        closeButton.Location = new Point(startX + setApiKeyButton.Width + 20, summaryPanel.Height - 50);
+
+                        // Add the button if not already added
+                        if (!summaryPanel.Controls.Contains(setApiKeyButton))
+                        {
+                            summaryPanel.Controls.Add(setApiKeyButton);
+                        }
+                    }
+                    else
+                    {
+                        // Not a rate limit error, ensure button is removed if it exists
+                        if (setApiKeyButton != null && summaryPanel.Controls.Contains(setApiKeyButton))
+                        {
+                            summaryPanel.Controls.Remove(setApiKeyButton);
+                        }
+                        closeButton.Location = new Point((summaryPanel.Width - closeButton.Width) / 2, summaryPanel.Height - 50);
+                    }
                 }
                 else
                 {
@@ -1897,6 +1991,13 @@ namespace HLMCUpdater
                         summaryTextBox.Size = new Size(summaryPanel.Width - 40, 30);
                     }
                     CenterControlX(summaryTextBox, summaryPanel);
+
+                    // Remove API key button for non-error cases
+                    if (setApiKeyButton != null && summaryPanel.Controls.Contains(setApiKeyButton))
+                    {
+                        summaryPanel.Controls.Remove(setApiKeyButton);
+                    }
+                    closeButton.Location = new Point((summaryPanel.Width - closeButton.Width) / 2, summaryPanel.Height - 50);
                 }
                 summaryTextBox.Visible = true;
             }
@@ -1963,6 +2064,20 @@ namespace HLMCUpdater
         {
             statusLabel.Text = text;
             CenterControlX(statusLabel, progressPanel);
+
+            // Adjust window height if label exceeds available space
+            int labelBottom = statusLabel.Location.Y + statusLabel.Height;
+            int requiredHeight = Math.Min(labelBottom + 50, 500); // Cap at 500 pixels max height
+            if (requiredHeight > this.Height)
+            {
+                this.Height = requiredHeight;
+                this.CenterToScreen();
+                // Reposition controls after height change
+                downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, statusLabel.Bottom + 20);
+                downloadProgressLabel.Location = new Point(0, downloadProgressBar.Location.Y + downloadProgressBar.Height + 10);
+                cancelButton.Location = new Point((progressPanel.Width - cancelButton.Width) / 2, progressPanel.Height - 50);
+            }
+
             this.Refresh();
         }
 
@@ -2017,6 +2132,27 @@ namespace HLMCUpdater
                 {
                     throw new Exception("Failed to fetch repository tree - no items found. JSON: " + json);
                 }
+            }
+        }
+
+        private void ClearRepositoryCache()
+        {
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string cacheDir = Path.Combine(appData, "HLMCUpdater");
+                string cacheFile = Path.Combine(cacheDir, "repoTreeCache.json");
+
+                if (File.Exists(cacheFile))
+                {
+                    File.Delete(cacheFile);
+                    UpdateStatus("Repository cache cleared for fresh data fetch");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Don't interrupt the update process for cache cleanup failure
+                LogException(new Exception($"Failed to clear repository cache: {ex.Message}"));
             }
         }
 
@@ -2090,12 +2226,49 @@ namespace HLMCUpdater
             var localFileNames = Directory.GetFiles(localDirPath, fileFilter).Select(Path.GetFileName).ToList();
             var githubFileNames = githubItems.Select(x => x.path?.Substring(folderName.Length + 1)).Where(x => !string.IsNullOrEmpty(x)).ToList();
 
-            var added = githubFileNames.Except(localFileNames).ToList();
-            var removed = localFileNames.Except(githubFileNames).ToList();
+            // Smart version matching for mod updates
+            var localBaseMap = CreateBaseNameMap(localFileNames.Where(x => !string.IsNullOrEmpty(x)));
+            var githubBaseMap = CreateBaseNameMap(githubFileNames.Where(x => !string.IsNullOrEmpty(x)));
+
+            // Calculate itemType once for the entire method
+            string itemType = folderName.ToUpper().TrimEnd('S');
+
+            // Find mods to update (same base name but different version)
+            var updatedMods = new List<Tuple<string, string, string>>();
+            var toldBeAdded = githubFileNames.Except(localFileNames).ToList();
+            var toldBeRemoved = localFileNames.Except(githubFileNames).ToList();
+
+            // Handle version updates
+            foreach (var localFile in localFileNames.Where(x => !string.IsNullOrEmpty(x)))
+            {
+                var localBase = GetBaseName(localFile!);
+                if (githubBaseMap.TryGetValue(localBase, out var githubMatches))
+                {
+                    var localVersion = ExtractVersion(localFile!);
+                    var githubVersion = githubMatches.Count > 0 ? ExtractVersion(githubMatches[0]!) : "";
+
+                    if (localVersion != githubVersion && githubMatches.Count > 0)
+                    {
+                        // Remove old version
+                        var oldFile = Path.Combine(localDirPath, localFile!);
+                        if (File.Exists(oldFile))
+                        {
+                            File.Delete(oldFile);
+                            results.Removed.Add($"{itemType}: {localFile} (updated to newer version)");
+                        }
+                    }
+                }
+            }
+
+            // Regular add/remove logic for unrelated files
+            var baseNamesToAdd = toldBeAdded.Where(x => !string.IsNullOrEmpty(x)).Select(x => GetBaseName(x!)).Except(localBaseMap.Keys).ToList();
+            var baseNamesToRemove = toldBeRemoved.Where(x => !string.IsNullOrEmpty(x)).Select(x => GetBaseName(x!)).Except(githubBaseMap.Keys).ToList();
+
+            var added = toldBeAdded.Where(x => !string.IsNullOrEmpty(x) && baseNamesToAdd.Contains(GetBaseName(x!))).ToList();
+            var removed = toldBeRemoved.Where(x => !string.IsNullOrEmpty(x) && baseNamesToRemove.Contains(GetBaseName(x!))).ToList();
 
             foreach (var itemName in removed.Where(x => !string.IsNullOrEmpty(x)))
             {
-                string itemType = folderName.ToUpper().TrimEnd('S');
                 results.Removed.Add($"{itemType}: {itemName}");
                 UpdateStatus($"Removing old {itemType}: {itemName}");
                 File.Delete(Path.Combine(localDirPath, itemName!));
@@ -2107,8 +2280,6 @@ namespace HLMCUpdater
                 {
                     debugLog.Add($"\n--- PROCESSING FILE: {itemName} ---");
                 }
-
-                string itemType = folderName.ToUpper().TrimEnd('S');
                 results.Added.Add($"{itemType}: {itemName}");
 
                 if (DebugLoggingEnabled)
@@ -2586,6 +2757,17 @@ namespace HLMCUpdater
             downloadProgressLabel.Text = $"Starting download of {itemName}{retryText}...";
             CenterControlX(downloadProgressLabel, progressPanel);
 
+            // Calculate final layout positions to avoid further adjustments during download
+            if (this.Height < 400)
+            {
+                this.Height = 400; // Set minimum height for downloads with some buffer
+                this.CenterToScreen();
+            }
+            // Ensure proper spacing once at the start
+            downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, statusLabel.Bottom + 20);
+            downloadProgressLabel.Location = new Point(0, downloadProgressBar.Location.Y + downloadProgressBar.Height + 15);
+            cancelButton.Location = new Point((progressPanel.Width - cancelButton.Width) / 2, progressPanel.Height - 60);
+
             try
             {
                 using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
@@ -2895,7 +3077,7 @@ namespace HLMCUpdater
 
             // Progress Panel
             CenterControlX(statusLabel, progressPanel);
-            downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, statusLabel.Bottom + 40);
+            downloadProgressBar.Location = new Point((progressPanel.Width - downloadProgressBar.Width) / 2, statusLabel.Bottom + 35);
             CenterControlX(downloadProgressLabel, progressPanel);
             cancelButton.Location = new Point((progressPanel.Width - cancelButton.Width) / 2, progressPanel.Height - 70);
 
