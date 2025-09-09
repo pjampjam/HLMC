@@ -171,10 +171,9 @@ namespace HLMCUpdater
             }
 
             message += "To ensure smooth updates, please provide a GitHub Personal Access Token.\n" +
-                      "This token increases your rate limit from 60 to 5000 requests/hour!\n\n" +
-                      "Token will be stored securely in your app settings.\n\n" +
-                      "Would you like to enter a token now?\n\n" +
-                      "📋 You can create a token here:\nhttps://github.com/settings/tokens";
+                       "This token increases your rate limit from 60 to 5000 requests/hour!\n\n" +
+                       "Token will be stored securely in your app settings.\n\n" +
+                       "Would you like to create / enter an existing token?";
 
             var result = MessageBox.Show(
                 message,
@@ -205,29 +204,12 @@ namespace HLMCUpdater
                             Text = "Paste your GitHub Personal Access Token below:\n\n" +
                                    "🔐 Token will be saved securely in app settings\n" +
                                    "⚡ Increases rate limit from 60 to 5000 requests/hour\n\n" +
-                                   "📋 Create new token at:",
+                                   "📋 Create new token at: ",
                             AutoSize = true,
                             Location = new Point(20, 10),
                             ForeColor = Color.White
                         };
                         inputForm.Controls.Add(label);
-
-                        var linkLabel = new LinkLabel
-                        {
-                            Text = "https://github.com/settings/tokens",
-                            Location = new Point(20, 85),
-                            Size = new Size(440, 20),
-                            LinkColor = Color.LightBlue,
-                            VisitedLinkColor = Color.LightBlue,
-                            Font = new Font("Arial", 10, FontStyle.Underline),
-                            ForeColor = Color.LightBlue
-                        };
-                        linkLabel.LinkClicked += (s, e) => Process.Start(new ProcessStartInfo
-                        {
-                            FileName = "https://github.com/settings/tokens",
-                            UseShellExecute = true
-                        });
-                        inputForm.Controls.Add(linkLabel);
 
                         var tokenLabel = new Label
                         {
@@ -249,9 +231,26 @@ namespace HLMCUpdater
                         };
                         inputForm.Controls.Add(textBox);
 
+                        var linkLabel = new LinkLabel
+                        {
+                            Text = "https://github.com/settings/tokens",
+                            Location = new Point(19, 87), // Position will be adjusted dynamically
+                            Size = new Size(440, 20),
+                            LinkColor = Color.LightBlue,
+                            VisitedLinkColor = Color.LightBlue,
+                            Font = new Font("Arial", 8, FontStyle.Underline),
+                            ForeColor = Color.LightBlue
+                        };
+                        linkLabel.LinkClicked += (s, e) => Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "https://github.com/settings/tokens",
+                            UseShellExecute = true
+                        });
+                        inputForm.Controls.Add(linkLabel);
+
                         var instructionLabel = new Label
                         {
-                            Text = "• Give 'repo' scope for private repos\n• Copy the token exactly as shown",
+                            Text = "• Generate new token - Repo-scoped\n• Copy the token exactly as shown",
                             Location = new Point(20, 150),
                             AutoSize = true,
                             ForeColor = Color.FromArgb(180, 180, 180),
@@ -261,10 +260,10 @@ namespace HLMCUpdater
 
                         var okButton = new Button
                         {
-                            Text = "Save & Continue",
+                            Text = "Save and Continue",
                             DialogResult = DialogResult.OK,
-                            Location = new Point(240, 170),
-                            Size = new Size(120, 30)
+                            Location = new Point(220, 160),
+                            Size = new Size(140, 30)
                         };
                         inputForm.Controls.Add(okButton);
                         inputForm.AcceptButton = okButton;
@@ -273,11 +272,24 @@ namespace HLMCUpdater
                         {
                             Text = "Skip",
                             DialogResult = DialogResult.Cancel,
-                            Location = new Point(360, 170),
+                            Location = new Point(360, 160),
                             Size = new Size(100, 30)
                         };
                         inputForm.Controls.Add(cancelButton);
                         inputForm.CancelButton = cancelButton;
+
+                        // Position the GitHub token creation link inline with the label text
+                        inputForm.Shown += (s, args) =>
+                        {
+                            // Calculate position for linkLabel to be inline with "Create new token at:" text
+                            string createTokenText = "📋 Create new token at: ";
+                            using (var graphics = inputForm.CreateGraphics())
+                            {
+                                var textWidth = TextRenderer.MeasureText(graphics, createTokenText, label.Font).Width;
+                                linkLabel.Location = new Point(17 + textWidth, 85); // 82 to align with "📋 Create new token at:" line
+                                linkLabel.BringToFront(); // Ensure linkLabel is visible over everything
+                            }
+                        };
 
                         if (inputForm.ShowDialog() == DialogResult.OK)
                         {
@@ -1126,6 +1138,20 @@ namespace HLMCUpdater
 
         private async Task<RateLimitInfo> CheckGitHubRateLimit()
         {
+            // Check for rate limit simulation toggle
+            if (IsRateLimitSimulationEnabled)
+            {
+                // Return simulated exhausted rate limit for testing purposes
+                UpdateStatus("🐛 TESTING: Simulating GitHub rate limit exhaustion");
+                await Task.Delay(500); // Brief delay to show the message
+                return new RateLimitInfo
+                {
+                    Limit = 60,
+                    Remaining = 0,
+                    ResetTime = DateTimeOffset.Now.AddHours(1)
+                };
+            }
+
             var info = new RateLimitInfo();
 
             try
@@ -1621,9 +1647,9 @@ namespace HLMCUpdater
                 UpdateStatus("Fetching repository file list...");
                 var repoTree = await FetchRepoTree();
 
-                // Only check rate limit if we suspect it might be an issue (<= 10 requests)
+                // Only check rate limit if we suspect it might be an issue (<= 10 requests) OR if simulation is enabled
                 RateLimitInfo? initialRateLimitInfo = null;
-                if (!string.IsNullOrEmpty(GitHubToken) || new Random().Next(10) == 0) // 10% chance check without token
+                if (!string.IsNullOrEmpty(GitHubToken) || new Random().Next(10) == 0 || IsRateLimitSimulationEnabled) // 10% chance check without token OR force check for simulation
                 {
                     UpdateStatus("🔍 Checking GitHub rate limit status...");
                     initialRateLimitInfo = await CheckGitHubRateLimit();
@@ -1649,73 +1675,31 @@ namespace HLMCUpdater
                         var resetTime = initialRateLimitInfo.ResetTime.Value;
                         var waitTime = resetTime - DateTimeOffset.Now;
 
-                        if (waitTime.TotalSeconds > 0)
-                        {
-                            DialogResult addTokenResult = MessageBox.Show(
-                                $"🔥 GitHub has blocked your requests due to rate limiting!\n\n" +
-                                $"• Rate limit will reset at: {resetTime:G}\n" +
-                                $"• Estimated wait time: {Math.Ceiling(waitTime.TotalMinutes):F0} minutes\n\n" +
-                                $"SOLUTION: Add a GitHub Personal Access Token to avoid rate limits\n" +
-                                $"📋 Create at: https://github.com/settings/tokens\n\n" +
-                                "Would you like to add a token now?",
-                                "GitHub Rate Limit Exceeded!",
-                                MessageBoxButtons.YesNo,
-                                MessageBoxIcon.Warning
-                            );
-
-                            if (addTokenResult == DialogResult.Yes)
-                            {
-                                if (await PromptForGitHubTokenAsync())
-                                {
-                                    UpdateStatus("Token added - continuing update...");
-                                    // Don't return, continue with the update
-                                }
-                                else
-                                {
-                                    Application.Exit();
-                                    return;
-                                }
-                            }
-                            else
-                            {
-                                Application.Exit();
-                                return;
-                            }
-                        }
                     }
 
-                    // Fallback if no reset time available
-                    DialogResult fallbackResult = MessageBox.Show(
-                        "🚫 GitHub API rate limit exceeded!\n\n" +
-                        "This is likely why you're getting error 404.\n\n" +
-                        "SOLUTIONS:\n" +
-                        "• Add a GitHub Personal Access Token (recommended)\n" +
-                        "• Wait 1 hour for automatic reset\n" +
-                        "• Check GitHub status at status.github.com\n\n" +
-                        "Would you like to add a GitHub token now?",
-                        "GitHub Rate Limit - Action Required!",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Exclamation
-                    );
+                    // Prompt for GitHub token when rate limit exceeded or ENABLE_RATE_LIMIT_SIMULATION is active
+                    if (!await PromptForGitHubTokenAsync())
+                    {
+                        // User cancelled token prompt or failed to provide valid token
+                        UpdateStatus("❌ Operation cancelled - GitHub API token required");
 
-                    if (fallbackResult == DialogResult.Yes)
-                    {
-                        if (await PromptForGitHubTokenAsync())
+                        // Clean up temp directory
+                        if (Directory.Exists(tempDir))
                         {
-                            UpdateStatus("Token added - continuing update...");
-                            // Don't return, continue with the update
+                            try { Directory.Delete(tempDir, true); } catch { }
                         }
-                        else
-                        {
-                            Application.Exit();
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        Application.Exit();
+
+                        // Re-enable start button since we cancelled
+                        startButton.Enabled = true;
+
+                        // Show cancelled message and return
+                        MessageBox.Show("Download cancelled. A GitHub Personal Access Token is required when rate limits are exceeded.", "Download Cancelled", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
+
+                    // If we reach here, token was provided successfully, continue with update
+                    UpdateStatus("✅ GitHub API token provided - continuing with update");
+                    await Task.Delay(1500); // Brief pause to show success message
                 }
 
                 using (var client = new HttpClient())
@@ -2014,9 +1998,11 @@ namespace HLMCUpdater
                     summaryTitleLabel.Text = "No updates were found.";
                     summaryTitleLabel.ForeColor = Color.Gray;
                     CenterControlX(summaryTitleLabel, summaryPanel);
+                    summaryTitleLabel.Location = new Point(summaryTitleLabel.Location.X, summaryPanel.Height / 2 - 70);
                     summaryCountLabel.Text = "";
                     CenterControlX(summaryCountLabel, summaryPanel);
                     summaryTextBox.Visible = false;
+                    closeButton.Location = new Point((summaryPanel.Width - closeButton.Width) / 2, summaryPanel.Height / 2 + 10);
                 }
                 else if (results.Status == "WARNING")
                 {
@@ -3349,6 +3335,15 @@ namespace HLMCUpdater
             [System.Text.Json.Serialization.JsonPropertyName("default_branch")]
             public string? DefaultBranch { get; set; }
             public bool Private { get; set; }
+        }
+
+        private bool IsRateLimitSimulationEnabled
+        {
+            get
+            {
+                string exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                return File.Exists(Path.Combine(exeDir, "ENABLE_RATE_LIMIT_SIMULATION"));
+            }
         }
 
         class RateLimitInfo

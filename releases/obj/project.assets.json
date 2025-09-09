@@ -81,7 +81,7 @@
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
-    "version": "1.1.2.2",
+    "version": "1.1.2.3",
     "restore": {
       "projectUniqueName": "C:\\Users\\Main\\Desktop\\Work\\.HLMCserver\\releases\\HLMCUpdater.csproj",
       "projectName": "Holy Lois Updater",
