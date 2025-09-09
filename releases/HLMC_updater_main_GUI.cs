@@ -147,8 +147,60 @@ namespace HLMCUpdater
 
         private async Task<bool> PromptForGitHubTokenAsync()
         {
-            // First get current rate limit status to show better messaging
-            RateLimitInfo rateInfo = await CheckGitHubRateLimit();
+            // First check if we already have a token and validate it
+            string existingToken = GitHubToken;
+            bool tokenValid = false;
+
+            if (!string.IsNullOrEmpty(existingToken))
+            {
+                try
+                {
+                    UpdateStatus("🔍 Validating existing GitHub token...");
+                    using (var testClient = new HttpClient())
+                    {
+                        testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater-TokenValidation");
+                        testClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", existingToken);
+
+                        var response = await testClient.GetAsync("https://api.github.com/rate_limit");
+                        if (response.IsSuccessStatusCode)
+                        {
+                            tokenValid = true;
+                            UpdateStatus("✅ GitHub token valid - using existing token");
+                            return true;
+                        }
+                        else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                                 response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                        {
+                            UpdateStatus("⚠️ GitHub token invalid or expired - will prompt for new token");
+                        }
+                        else
+                        {
+                            // Other errors, treat as valid to avoid breaking on temporary issues
+                            tokenValid = true;
+                            UpdateStatus("⚠️ Unable to validate token due to network issue - proceeding with existing token");
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Network or other errors, treat as valid to be safe
+                    tokenValid = true;
+                    UpdateStatus("⚠️ Unable to validate token - proceeding with existing token");
+                    return true;
+                }
+            }
+
+            // Get current rate limit status to show better messaging (without token if not valid)
+            RateLimitInfo rateInfo;
+            if (tokenValid && !string.IsNullOrEmpty(existingToken))
+            {
+                rateInfo = await CheckGitHubRateLimit(); // This will use the existing token
+            }
+            else
+            {
+                rateInfo = await CheckGitHubRateLimit(); // This will be without token
+            }
 
             string message = "GitHub API requests rate limit exceeded.\n\n";
             string title = "Rate Limit Exceeded";
@@ -1159,6 +1211,12 @@ namespace HLMCUpdater
                 using (var testClient = new HttpClient())
                 {
                     testClient.DefaultRequestHeaders.UserAgent.ParseAdd("HLMCUpdater-RateLimitCheck");
+
+                    // Use GitHub token if available
+                    if (!string.IsNullOrEmpty(GitHubToken))
+                    {
+                        testClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GitHubToken);
+                    }
 
                     // Make a simple test request to get rate limit headers
                     var response = await testClient.GetAsync("https://api.github.com/rate_limit");
@@ -2220,6 +2278,9 @@ namespace HLMCUpdater
             // Calculate itemType once for the entire method
             string itemType = folderName.ToUpper().TrimEnd('S');
 
+            // Track updated mods for proper inclusion in added section
+            var updatedBaseNames = new HashSet<string>();
+
             // Find mods to update (same base name but different version)
             var updatedMods = new List<Tuple<string, string, string>>();
             var toldBeAdded = githubFileNames.Except(localFileNames).ToList();
@@ -2236,6 +2297,9 @@ namespace HLMCUpdater
 
                     if (localVersion != githubVersion && githubMatches.Count > 0)
                     {
+                        // Mark this base name as updated
+                        updatedBaseNames.Add(localBase);
+
                         // Remove old version
                         var oldFile = Path.Combine(localDirPath, localFile!);
                         if (File.Exists(oldFile))
@@ -2248,7 +2312,7 @@ namespace HLMCUpdater
             }
 
             // Regular add/remove logic for unrelated files
-            var baseNamesToAdd = toldBeAdded.Where(x => !string.IsNullOrEmpty(x)).Select(x => GetBaseName(x!)).Except(localBaseMap.Keys).ToList();
+            var baseNamesToAdd = toldBeAdded.Where(x => !string.IsNullOrEmpty(x)).Select(x => GetBaseName(x!)).Where(baseName => !localBaseMap.ContainsKey(baseName) || updatedBaseNames.Contains(baseName)).ToList();
             var baseNamesToRemove = toldBeRemoved.Where(x => !string.IsNullOrEmpty(x)).Select(x => GetBaseName(x!)).Except(githubBaseMap.Keys).ToList();
 
             var added = toldBeAdded.Where(x => !string.IsNullOrEmpty(x) && baseNamesToAdd.Contains(GetBaseName(x!))).ToList();

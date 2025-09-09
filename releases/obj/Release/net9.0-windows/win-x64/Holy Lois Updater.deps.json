@@ -7,7 +7,7 @@
   "targets": {
     ".NETCoreApp,Version=v9.0": {},
     ".NETCoreApp,Version=v9.0/win-x64": {
-      "Holy Lois Updater/1.1.2.3": {
+      "Holy Lois Updater/1.1.2.4": {
         "runtime": {
           "Holy Lois Updater.dll": {}
         }
@@ -15,7 +15,7 @@
     }
   },
   "libraries": {
-    "Holy Lois Updater/1.1.2.3": {
+    "Holy Lois Updater/1.1.2.4": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
